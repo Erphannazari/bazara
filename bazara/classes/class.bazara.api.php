@@ -2321,6 +2321,16 @@ class BazaraApi
     {
         set_time_limit(0);
 
+        if (class_exists("OrderStatus")) {
+            // بررسی وضعیت سفارش
+            if (!is_order_status_valid($order_id)) {
+                return array(
+                    'success' => false,
+                    'message' => 'سفارش با شناسه ' . $order_id . ' وضعیت مجاز برای همگام‌سازی ندارد.'
+                );
+            }
+        }
+
         if (empty($token)) {
             $token_result = $this->login_token();
             if (!$token_result['success'])
@@ -2328,8 +2338,12 @@ class BazaraApi
             $token = $token_result['message'];
         }
 
-        if (empty($order_id))
-            return array('success' => true, 'message' => 'سفارشی برای ارسال اطلاعات وجود ندارد.');
+        if (empty($order_id)) {
+            return [
+                'success' => true,
+                'message' => 'سفارشی برای ارسال اطلاعات وجود ندارد.'
+            ];
+        }
 
         $hpos_enable = false;
 

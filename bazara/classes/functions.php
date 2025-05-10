@@ -502,7 +502,7 @@ function get_product_details($ProductID, $StoreID = "")
     ON detail.ProductDetailId = detailAsset.ProductDetailId 
     
     WHERE
-    detail.ProductId = {$ProductID} ORDER BY detail.p_d_id ASC";
+    detail.ProductId = {$ProductID} AND detail.Deleted = 0 ORDER BY detail.p_d_id ASC";
     return $wpdb->get_results($query);
 }
 function get_product_details_unsynced($ProductID, $StoreID = "")
@@ -532,7 +532,7 @@ function get_product_details_unsynced($ProductID, $StoreID = "")
     ON detail.ProductDetailId = detailAsset.ProductDetailId 
     
     WHERE
-    detail.ProductId = {$ProductID} ORDER BY detail.p_d_id ASC";
+    detail.ProductId = {$ProductID} AND detail.Deleted = 0 ORDER BY detail.p_d_id ASC";
 
     return $wpdb->get_results($query);
 }
@@ -619,11 +619,13 @@ function bazara_woocommerce_thankyou($order_id)
         $exist = $order->get_meta('mahak_id', true);
     }
 
-    if (!empty($exist))
+    if (!empty($exist)) {
         return;
-    $bazaraApi = new BazaraApi(true);
-    $api_result = $bazaraApi->bazara_save_order($order_id, null);
-    bazara_save_log(date_i18n('Y-m-j'), 'ارسال اطلاعات سفارش [' . $order_id . '] به سرور', $api_result['message'], $api_result['success']);
+    } else {
+        $bazaraApi = new BazaraApi(true);
+        $api_result = $bazaraApi->bazara_save_order($order_id, null);
+        bazara_save_log(date_i18n('Y-m-j'), 'ارسال اطلاعات سفارش [' . $order_id . '] به سرور', $api_result['message'], $api_result['success']);
+    }
 }
 
 function get_income_commission_from_customer($customer_id)
@@ -3275,7 +3277,8 @@ function jalali_to_datetimestamp($date, $first = true)
 
 add_action('woocommerce_new_order', 'sync_and_update_order_id_greater_than', 10, 2);
 
-function sync_and_update_order_id_greater_than($order_id, $order) {
+function sync_and_update_order_id_greater_than($order_id, $order)
+{
     // دریافت تنظیمات
     $options = get_option('bazara_visitor_settings', []);
 
@@ -3297,4 +3300,31 @@ function sync_and_update_order_id_greater_than($order_id, $order) {
             }
         }
     }
+}
+
+function is_order_status_valid($order_id)
+{
+    global $wpdb;
+    $valid_statuses = ['wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged'];
+
+    // بررسی اینکه HPOS فعال است یا خیر
+    $hpos_enable = get_option('woocommerce_custom_orders_table_enabled') === 'yes';
+
+    if ($hpos_enable) {
+        // حالت HPOS: استفاده از جدول wc_orders
+        $table_orders = "{$wpdb->prefix}wc_orders";
+        $status = $wpdb->get_var($wpdb->prepare(
+            "SELECT status FROM `$table_orders` WHERE id = %d",
+            $order_id
+        ));
+    } else {
+        // حالت عادی: استفاده از جدول posts
+        $status = $wpdb->get_var($wpdb->prepare(
+            "SELECT post_status FROM {$wpdb->posts} WHERE ID = %d AND post_type = 'shop_order'",
+            $order_id
+        ));
+    }
+
+    // بررسی اینکه وضعیت در لیست مجاز است یا خیر
+    return in_array($status, $valid_statuses, true);
 }
