@@ -17,6 +17,9 @@ class Bazara_Products_List extends WP_List_Table
 			'plural'   => __('products', 'sp'), //plural name of the listed records
 			'ajax'     => false //does this table support ajax?
 		]);
+
+		// Add admin notice hook
+		add_action('admin_notices', array($this, 'display_admin_notices'));
 	}
 
 
@@ -254,11 +257,33 @@ class Bazara_Products_List extends WP_List_Table
 			}
 
 			$bazara = new BazaraApi(true);
-			$message = $bazara->start_sync_new_product(0, 100000, true)['message'];
+			$result = $bazara->start_sync_new_product(0, 100000, true);
+			
+			if (isset($result['message']) && !empty($result['message'])) {
+				// Store the message in a transient
+				set_transient('bazara_sync_message', $result['message'], 45);
+			}
+
 			// esc_url_raw() is used to prevent converting ampersand in url to "#038;"
 			// add_query_arg() return the current url
 			wp_redirect(esc_url_raw(add_query_arg()));
 			exit;
+		}
+	}
+
+	/**
+	 * Display admin notices
+	 */
+	public function display_admin_notices() {
+		$message = get_transient('bazara_sync_message');
+		if ($message) {
+			?>
+			<div class="notice notice-success is-dismissible">
+				<p><?php echo wp_kses_post(nl2br($message)); ?></p>
+			</div>
+			<?php
+			// Delete the transient after displaying
+			delete_transient('bazara_sync_message');
 		}
 	}
 }
