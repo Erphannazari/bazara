@@ -22,6 +22,37 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
+
+// Check if WooCommerce is active
+function bazara_check_woocommerce() {
+    if (!class_exists('WooCommerce')) {
+        add_action('admin_notices', 'bazara_woocommerce_missing_notice');
+        return false;
+    }
+    return true;
+}
+
+// Admin notice for missing WooCommerce
+function bazara_woocommerce_missing_notice() {
+    ?>
+    <div class="error">
+        <p><?php _e('بازارا نیاز به افزونه ووکامرس دارد. لطفا ابتدا ووکامرس را نصب و فعال کنید.', 'bazara'); ?></p>
+    </div>
+    <?php
+}
+
+// Prevent plugin activation if WooCommerce is not active
+register_activation_hook(__FILE__, 'bazara_activation_check');
+function bazara_activation_check() {
+    if (!bazara_check_woocommerce()) {
+        deactivate_plugins(plugin_basename(__FILE__));
+        wp_die(__('بازارا نیاز به افزونه ووکامرس دارد. لطفا ابتدا ووکامرس را نصب و فعال کنید.', 'bazara'));
+    }
+}
+
+// Check WooCommerce on plugin load
+add_action('plugins_loaded', 'bazara_check_woocommerce');
+
 if ( ! defined( 'BAZARA_PLUGIN_FILE' ) ) {
     define( 'BAZARA_PLUGIN_FILE', __FILE__ );
 }
