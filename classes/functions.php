@@ -1276,57 +1276,80 @@ function create_product($args)
         }
 
         if ($args['stockSync'] == 0) {
-
-
-            //$product->set_virtual(isset($args['virtual']) ? $args['virtual'] : false);
             if (isset($args['qty']) && ($OptionQuantity || $OptionQuantity == 1) && !$DontUpdateproduct) {
-
-                if (!empty($args['vars']) && $SerialProduct) {
-                    $data['qty'] = 0;
-                    foreach ($args['vars'] as $attr) {
-                        if ($attr['deleted'] == 1 || $attr['deleted']) continue;
-                        $data['qty'] = $attr['qty'];
-                        $args['qty'] += $attr['qty'];
-                        $data['detail_id'] = $attr['detail_id'];
-                        if ($data['qty'] > 0)
-                            $map[] = $data;
-                    }
-                    // $args['stock_qty'] = $args['qty'];              
-                    $args['manage_stock'] = (int)$args['qty'] > 0;
-                    $args['stock_status'] = (int)$args['qty'] > 0 ? 'instock' : 'outofstock';
-                    $product->set_stock_quantity($args['qty']);
-                }
-
-                if (empty($args['vars'])) {
-                    $args['qty'] -= get_order_item_qty($product->get_id(), '_product_id');
-                    $args['qty'] -= get_bazara_not_converted_qty($args['ProductDetails'][0]);
-                }
-                $args['manage_stock'] = $args['qty'] > 0;
-                $product->set_stock_quantity($args['qty']);
-                $product->set_manage_stock((isset($args['manage_stock']) && $args['qty'] > 0) ? $args['manage_stock'] : false);
-                $product->set_stock_status((isset($args['qty']) && $args['qty'] > 0) ? 'instock' : 'outofstock');
-                if (isset($args['manage_stock']) && $args['manage_stock']) {
-                    $product->set_stock_status((isset($args['qty']) && $args['qty'] > 0) ? 'instock' : 'outofstock');
-                    $product->set_backorders(isset($args['backorders']) ? $args['backorders'] : 'no'); // 'yes', 'no' or 'notify'
-                }
-
-                if (class_exists('bazara_ratio_calculator'))
-                    $product->set_weight(number_format($args['qty2'], 2));
-
-
-                if (empty($args['vars']))
-                    update_schedule_sync($args['ProductId'], 'stockSync');
-                if (class_exists('WooCommerce_Role_Based_Price_Product_Pricing'))
-                    delete_product_wcrb_transient($product_id);
-
-                if (class_exists("bazara_manage_quantity") && $args['qty'] <= 0) {
-                    $product->set_stock_quantity(0);
-                    $product->set_manage_stock(true);
-                    $product->set_stock_status('instock');
-                }
+            $is_variable = $product->get_type() === 'variable';
+            
+            if (!empty($args['vars']) && $SerialProduct) {
+            $data['qty'] = 0;
+            foreach ($args['vars'] as $attr) {
+            if ($attr['deleted'] == 1 || $attr['deleted']) continue;
+            $data['qty'] = $attr['qty'];
+            $args['qty'] += $attr['qty'];
+            $data['detail_id'] = $attr raro['detail_id'];
+            if ($data['qty'] > 0)
+            $map[] = $data;
+            }
+            $args['manage_stock'] = (int)$args['qty'] > 0;
+            $args['stock_status'] = (int)$args['qty'] > 0 ? 'instock' : 'outofstock';
+            // Only set stock quantity for variable products with SerialProduct
+            $product->set_stock_quantity($args['qty']);
+            }
+            
+            if (empty($args['vars']) && !$is_variable) {
+            $order_qty = get_order_item_qty($product->get_id(), '_product_id');
+            $order_qty = is_numeric($order_qty) && $order_qty >= 0 ? $order_qty : 0;
+            $bazara_qty = get_bazara_not_converted_qty($args['ProductDetails'][0]);
+            $bazara_qty = is_numeric($bazara_qty) && $bazara_qty >= 0 ? $bazara_qty : 0;
+            $args['qty'] -= $order_qty + $bazara_qty;
+            
+            $args['manage_stock'] = $args['qty'] > 0;
+            $product->set_stock_quantity($args['qty']);
+            $product->set_manage_stock((isset($args['manage_stock']) && $args['qty'] > 0) ? $args['manage_stock'] : false);
+            $product->set_stock_status((isset($args['qty']) && $args['qty'] > 0) ? 'instock' : 'outofstock');
+            }
+            
+            if ($is_variable) {
+            // Disable stock management at parent product level for variable products
+            $product->set_manage_stock(false);
+            // Do not set stock quantity for variable products
+            $product->set_stock_status('instock'); // Default to instock, will be adjusted based on variations
+            }
+            
+            if (isset($args['manage_stock']) && $args['manage_stock'] && !$is_variable) {
+            $product->set_stock_status((isset($args['qty']) && $args['qty'] > 0) ? 'instock' : 'outofstock');
+            $product->set_backorders(isset($args['backorders']) ? $args['backorders'] : 'no');
+            }
+            
+            if (class_exists('bazara_ratio_calculator') && !$is_variable)
+            $product->set_weight(number_format($args['qty2'], 2));
+            
+            if (empty($args['vars']))
+            update_schedule_sync($args['ProductId'], 'stockSync');
+            if (class_exists('WooCommerce_Role_Based_Price_Product_Pricing'))
+            delete_product_wcrb_transient($product_id);
+            
+            if ($args['qty'] <= 0 || $is_variable) {
+            // Check if product is variable and has any instock variations
+            $all_variations_outofstock = true;
+            
+            if ($is_variable) {
+            $variations = wc_get_products([
+            'type' => 'variation',
+            'parent' => $product->get_id(),
+            'stock_status' => 'instock',
+            'limit' => 1,
+            ]);
+            $all_variations_outofstock = empty($variations);
+            }
+            
+            // If simple product with qty <= 0 or all variations are out of stock, mark as outofstock
+            if ((!$is_variable && $args['qty'] <= 0) || ($is_variable && $all_variations_outofstock)) {
+            product_out_of_Stock($product->get_id());
+            }
+            }
             } else
-                update_schedule_sync($args['ProductId'], 'stockSync');
-        }
+            update_schedule_sync($args['ProductId'], 'stockSync');
+            }
         if ($args['detailSync'] == 0) {
             if (!empty($args['vars'])) {
                 $selectedInvisibleVariation = !empty($options['variationVisibilityType']) ? ($options['variationVisibilityType']) : '';
@@ -1743,34 +1766,28 @@ function create_variations($product_id, $args, $final_price, $wholeSalePrice, $c
     }
     // Prices
     if ($productArgs['stockSync'] == 0) {
-
         if ($OptionQuantity && !$DontUpdateproduct) {
-            //*** attention : While orders did not send to bazara,quantity has to reduce in order to prevent sales outofstock products ***/
-            $args['qty'] -= get_order_item_qty($variation->get_id(), '_variation_id');
-            $args['qty'] -= get_bazara_not_converted_qty($args['detail_id']);
-            $args['manage_stock'] = $args['qty'] > 0;
-
-
-            $qty = $args['qty'];
-            if ($qty <= 0) {
-                if (class_exists("bazara_manage_quantity")) {
-                    $variation->set_stock_quantity(0);
-                    $variation->set_manage_stock(true);
-                    $variation->set_stock_status('instock');
-                } else {
-                    $variation->set_stock_status('outofstock');
-                    $variation->set_manage_stock(false);
-                    product_out_of_Stock($variation->get_id());
-                }
-            } else {
-                $variation->set_stock_quantity($args['qty']);
-                $variation->set_manage_stock(true);
-                $variation->set_stock_status('instock');
-            }
-
-            update_schedule_sync($productArgs['ProductId'], 'stockSync', 1, 'bazara_products', 'ProductID');
+        $order_qty = get_order_item_qty($variation->get_id(), '_variation_id');
+        $order_qty = is_numeric($order_qty) && $order_qty >= 0 ? $order_qty : 0;
+        $bazara_qty = get_bazara_not_converted_qty($args['detail_id']);
+        $bazara_qty = is_numeric($bazara_qty) && $bazara_qty >= 0 ? $bazara_qty : 0;
+        $args['qty'] -= $order_qty + $bazara_qty;
+        
+        $args['manage_stock'] = $args['qty'] > 0;
+        
+        $qty = $args['qty'];
+        if ($qty <= 0) {
+        $variation->set_manage_stock(false);
+        product_out_of_Stock($variation->get_id());
+        } else {
+        $variation->set_stock_quantity($args['qty']);
+        $variation->set_manage_stock(true);
+        $variation->set_stock_status('instock');
         }
-    }
+        
+        update_schedule_sync($productArgs['ProductId'], 'stockSync', 1, 'bazara_products', 'ProductID');
+        }
+        }
     if ($productArgs['priceSync'] == 0) {
 
         if ($OptionPrice && !class_exists('bazara_ratio_calculator')) {
@@ -1974,19 +1991,28 @@ function delete_product_wcrb_transient($productID)
 //todo : change it to private
 function product_out_of_Stock($product_id)
 {
-    $out_of_stock_staus = 'outofstock';
+$out_of_stock_status = 'outofstock';
 
-    // 1. Updating the stock quantity
-    update_post_meta($product_id, '_stock', 0);
+// 1. Updating the stock quantity
+$stock_updated = update_post_meta($product_id, '_stock', 0);
+if ($stock_updated === false) {
+error_log("Failed to update _stock meta for product ID $product_id");
+}
 
-    // 2. Updating the stock quantity
-    update_post_meta($product_id, '_stock_status', wc_clean($out_of_stock_staus));
+// 2. Updating the stock status
+$status_updated = update_post_meta($product_id, '_stock_status', wc_clean($out_of_stock_status));
+if ($status_updated === false) {
+error_log("Failed to update _stock_status meta for product ID $product_id");
+}
 
-    // 3. Updating post term relationship
-    wp_set_post_terms($product_id, 'outofstock', 'product_visibility', true);
+// 3. Updating post term relationship
+$terms_updated = wp_set_post_terms($product_id, 'outofstock', 'product_visibility', true);
+if (is_wp_error($terms_updated)) {
+error_log("Failed to update product_visibility term for product ID $product_id: " . $terms_updated->get_error_message());
+}
 
-    // And finally (optionally if needed)
-    wc_delete_product_transients($product_id); // Clear/refresh the variation cache
+// 4. Clear/refresh the variation cache
+wc_delete_product_transients($product_id);
 }
 
 // Utility function that returns the correct product object instance
