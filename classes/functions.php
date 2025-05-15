@@ -1285,7 +1285,7 @@ function create_product($args)
             if ($attr['deleted'] == 1 || $attr['deleted']) continue;
             $data['qty'] = $attr['qty'];
             $args['qty'] += $attr['qty'];
-            $data['detail_id'] = $attr raro['detail_id'];
+            $data['detail_id'] = $attr['detail_id'];
             if ($data['qty'] > 0)
             $map[] = $data;
             }

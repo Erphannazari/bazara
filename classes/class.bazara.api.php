@@ -2908,7 +2908,7 @@ class BazaraApi
                 'deliveryDate' => $completed_date,
                 'personId' => (int)$user_person['personId'],
                 'orderDate' => $completed_date,
-                'description' =>   '',
+                'description' =>   $order->get_customer_note(),
                 'discount' =>  $total_discount,
                 'discountType' =>  0,
                 'visitorId' =>   $visitorId,
