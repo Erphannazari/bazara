@@ -3296,15 +3296,32 @@ function bazara_is_rtl($string)
 function jalali_to_datetimestamp($date, $first = true)
 {
     date_default_timezone_set('Asia/Tehran');
-    $time = explode('/', $date);
-    $gregorian = jalali_to_gregorian($time[0], $time[1], $time[2], '/');
-    /* $gregorian = explode('/', $gregorian);
-         if ($first)
-             $timeNow = mktime(0, 0, 0, $gregorian[1], $gregorian[2], $gregorian[0]);
-         else
-             $timeNow = mktime(23, 59, 59, $gregorian[1], $gregorian[2], $gregorian[0]);*/
-
-    return $gregorian . ' ' . date('H:i:s', time());
+    
+    // If date is already in Gregorian format (contains -), return as is
+    if (strpos($date, '-') !== false) {
+        return $date;
+    }
+    
+    // If date is in Persian format (contains /), convert it
+    if (strpos($date, '/') !== false) {
+        $time = explode('/', $date);
+        $gregorian = jalali_to_gregorian($time[0], $time[1], $time[2], '-');
+        return $gregorian . ' ' . date('H:i:s', strtotime($date));
+    }
+    
+    // If date is in timestamp format, convert to Gregorian
+    if (is_numeric($date)) {
+        return date('Y-m-d H:i:s', $date);
+    }
+    
+    // If none of the above, try to parse the date
+    $timestamp = strtotime($date);
+    if ($timestamp !== false) {
+        return date('Y-m-d H:i:s', $timestamp);
+    }
+    
+    // If all else fails, return current date in Gregorian format
+    return date('Y-m-d H:i:s');
 }
 
 // add_action('woocommerce_new_order', 'update_order_id_greater_than_on_new_order', 10, 2);

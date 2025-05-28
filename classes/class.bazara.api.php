@@ -2459,10 +2459,8 @@ class BazaraApi
             $completed_date = $ps->post_date;
         }
         
-        // Check if date is in Persian format (contains /) and convert if needed
-        if (strpos($completed_date, '/') !== false) {
-            $completed_date = jalali_to_datetimestamp($completed_date);
-        }
+        // Always convert date to Gregorian format using jalali_to_datetimestamp
+        $completed_date = jalali_to_datetimestamp($completed_date);
 
         if (!$hpos_enable)
             $order_number = get_post_meta($order_id, '_order_number', true);
