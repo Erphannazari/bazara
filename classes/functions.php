@@ -349,6 +349,30 @@ function get_products($all = false, $min = 0, $schedule = false)
     $query = "SELECT * FROM {$wpdb->prefix}bazara_products where Deleted = 0 AND (queue = 0 or queue IS NULL)  {$cond2} order by ProductID {$cond} ";
     return $wpdb->get_results($query);
 }
+function get_products_v3($all = false, $min = 0, $max = 10000, $schedule = false)
+{
+    global  $wpdb;
+
+    $cond = '';
+    $cond2 = '';
+    $setting_Options = get_bazara_visitor_settings();
+
+    if (!$all)
+        $cond = ' limit ' . (int)$min . ',' . (int)$max;
+    if ($schedule) {
+        $cond2 = ' AND ((detailSync = 0 OR detailSync IS NULL) ';
+    }
+    if (!class_exists('bazara_ratio_calculator') && $setting_Options['chkPrice'])
+        $cond2 .= ' OR (priceSync = 0 OR priceSync IS NULL) ';
+
+    if ($setting_Options['chkQuantity'])
+        $cond2 .= ' OR (stockSync = 0 OR stockSync IS NULL) ';
+
+    $cond2 .= ' )';
+
+    $query = "SELECT * FROM {$wpdb->prefix}bazara_products where Deleted = 0 AND (queue = 0 or queue IS NULL)  {$cond2} order by ProductID {$cond} ";
+    return $wpdb->get_results($query);
+}
 function get_banks()
 {
     global  $wpdb;
@@ -2302,7 +2326,6 @@ add_action('admin_post_nopriv_clear_tables_queue', 'clear_tables_queue');
 
 function bazara_run_product_synchronize()
 {
-
     $bazara_options = bazara_get_options();
 
     if ($bazara_options['CreditDay'] < 0) {
@@ -2320,13 +2343,10 @@ function bazara_run_product_synchronize()
     $syncCategory = (!empty($visitorSetting['chkCategory']) && $visitorSetting['chkCategory']) ? ($visitorSetting['chkCategory'] == "cat" ? BAZARA_PRODUCT_CATEGORY : BAZARA_PRODUCT_SUB_CATEGORY) : false;
 
     if ($syncProduct) {
-
         $entities = [
             'Settings',
-            'VisitorProducts',
+            'ProductSync', // New combined sync for products
             'ProductDetailStoreAssets',
-            'Products',
-            'ProductDetails',
             'Stores',
             'PersonGroups',
             'PropertyDescriptions',
@@ -2337,17 +2357,16 @@ function bazara_run_product_synchronize()
             'Persons',
             'SubCategory',
             'Orders',
-            'OrderDetails',
-
+            'OrderDetails'
         ];
 
         if (class_exists('bazara_addOns'))
             $entities[] = 'Transactions';
 
         for ($i = 0; $i < count($entities); $i++) {
-
             $bazara->bazara_copy_entities($entities[$i], 0, 100000);
         }
+
         if (get_product_cnt() > 0) {
             if ($syncCategory)
                 $bazara->start_sync_category(null, $syncCategory);
@@ -2355,13 +2374,16 @@ function bazara_run_product_synchronize()
             $message = $bazara->start_sync_new_product(0, 10000, true)['message'];
             clear_junk_data();
         }
+
         if ($syncPicture) {
             $bazara->sync_pictures()['message'];
         }
     }
+
     if (class_exists('bazara_addOns')) {
         $bazara->bazara_copy_entities("Transactions", 0, 100000);
     }
+
     if ($syncPersons)
         $bazara->start_sync_persons();
 

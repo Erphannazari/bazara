@@ -648,7 +648,7 @@ class BazaraApi
             $success = 0;
             $errors = 0;
             $ProductArray = [];
-            $products = get_products(false, $min, $max);
+            $products = get_products_v3(false, $min, $max, $schd);
             $properties = get_properties();
             $extraDatas = get_extras();
             $Qauntity = class_exists('bazara_ratio_calculator') ? 'Count2' : 'Count1';
@@ -1002,13 +1002,16 @@ class BazaraApi
     }
     public function bazara_copy_entities($type = 'products', $min = 0, $max = 20)
     {
-
-
         if (empty($token)) {
             $token_result = $this->login_token();
             if (!$token_result['success'])
                 return array('success' => false, 'message' => $token_result['message']);
             $token = $token_result['message'];
+        }
+
+        // Handle combined product sync
+        if ($type === 'ProductSync') {
+            return $this->sync_combined_products($token, $min, $max);
         }
 
         if ($this->entities[$type]['alias'] == 'Settings')
@@ -1716,22 +1719,48 @@ class BazaraApi
 
 
     public function sync_pictures()
-    {
+{
+    $error_message = "";
+    $message = "";
+    $success = 0;
+    $errors = 0;
 
-        $error_message = "";
-        $message = "";
-        $success = 0;
-        $errors = 0;
+    $pictures = get_pictures();
+    $processed_products = []; // برای ردیابی محصولاتی که پردازش شده‌اند
 
-        $pictures = get_pictures();
-        foreach ($pictures as $pic) {
+    // گروه‌بندی تصاویر بر اساس محصول
+    $product_pictures = [];
+    foreach ($pictures as $pic) {
+        $pic = (array)$pic;
+        $product_pictures[$pic['ItemCode']][] = $pic;
+    }
 
-            $pic = (array)$pic;
-            $objProduct = get_product_by_mahakID($pic['ItemCode']);
-            if (empty($objProduct)) continue;
+    foreach ($product_pictures as $item_code => $pics) {
+        $objProduct = get_product_by_mahakID($item_code);
+        if (empty($objProduct)) continue;
+
+        $product_id = $objProduct->get_id();
+
+        // حذف کامل تصویر شاخص و گالری برای محصول
+        if (!isset($processed_products[$product_id])) {
+            // حذف تصویر شاخص
+            delete_post_meta($product_id, '_thumbnail_id');
+            // حذف گالری تصاویر
+            delete_post_meta($product_id, '_product_image_gallery');
+            $processed_products[$product_id] = true;
+        }
+
+        // پردازش تصاویر محصول
+        $first_image = true; // برای تنظیم اولین تصویر به‌عنوان شاخص
+        foreach ($pics as $pic) {
             update_picture_queue($pic['PictureId'], 1);
 
             try {
+                $attach_id = null;
+                $FileName = basename($pic['Url']);
+                $expected_url = $this->img_url . $FileName;
+
+                // جستجوی تصویر با شناسه محک
                 $args = array(
                     'post_status' => 'inherit',
                     'post_type' => 'attachment',
@@ -1742,34 +1771,35 @@ class BazaraApi
                         )
                     )
                 );
+
                 $posts = get_posts($args);
 
+                // اگر تصویر وجود داشت اما نام فایل متفاوت بود، تصویر جدید آپلود شود
                 if (!empty($posts)) {
-                    $attach_id = $posts[0]->ID;
-                } else {
-                    $FileName = basename($pic['Url']);
-                    $attach_id = uploadMedia($this->img_url . $FileName, $FileName);
-                    if (is_wp_error($attach_id)) {
-                        $errors++;
-                        $error_message .= '[' . $objProduct->get_name() . '] ' . $attach_id->get_error_message() . '<br/>';
+                    $existing_id = $posts[0]->ID;
+                    $attachment_url = wp_get_attachment_url($existing_id);
+
+                    if (strpos($attachment_url, $FileName) === false) {
+                        // فایل متفاوت است → آپلود جدید
+                        $attach_id = uploadMedia($expected_url, $FileName);
+                    } else {
+                        $attach_id = $existing_id;
                     }
+                } else {
+                    // تصویر وجود نداشت → آپلود جدید
+                    $attach_id = uploadMedia($expected_url, $FileName);
                 }
+
+                // بررسی موفقیت آپلود
                 if (!is_wp_error($attach_id) && $attach_id) {
+                    // ثبت متاهای اضافی
                     update_post_meta($attach_id, 'mahak_picture_id', $pic['PictureId']);
                     update_post_meta($attach_id, 'mahak_row_version', $pic['RowVersion']);
-                    $thumbnail_id = get_post_thumbnail_id($objProduct->get_id());
-                    //اگر تصویر شامل _1 باشد یا محصول شاخص نداشته باشد یا شاخص فعلی حاوی _1 نباشد تصویر جاری شاخص بشود
-                    if (
-                        substr(get_the_title($thumbnail_id), 0, 1) === "0" || empty($thumbnail_id)
-                        || substr(get_the_title($thumbnail_id), 0, 1) === "0"
-                    ) {
+
+                    // تنظیم تصویر شاخص یا اضافه کردن به گالری
+                    if ($first_image) {
                         $objProduct->set_image_id($attach_id);
-                        if (!empty($thumbnail_id)) {
-                            $productImagesIDs = $objProduct->get_gallery_image_ids();
-                            $productImagesIDs[] = $thumbnail_id;
-                            $productImagesIDs = array_unique($productImagesIDs);
-                            $objProduct->set_gallery_image_ids($productImagesIDs);
-                        }
+                        $first_image = false;
                     } else {
                         $productImagesIDs = $objProduct->get_gallery_image_ids();
                         $productImagesIDs[] = $attach_id;
@@ -1778,28 +1808,38 @@ class BazaraApi
                     }
 
                     $objProduct->save();
+
+                    // تأیید تصویر شاخص (برای دیباگ)
+                    $new_thumbnail_id = get_post_thumbnail_id($objProduct->get_id());
+                    var_dump(wp_get_attachment_url($new_thumbnail_id));
+                    die;
+
                     $success++;
                     update_picture_status($pic['PictureId']);
                     update_picture_queue($pic['PictureId'], 0);
                     bazara_update_latest_versions('picture', $pic['RowVersion']);
+                } else {
+                    $errors++;
+                    $error_message .= '[' . $objProduct->get_name() . '] ' . $attach_id->get_error_message() . '<br/>';
                 }
+
             } catch (\Exception $e) {
                 $errors++;
                 $error_message .= '[' . $objProduct->get_name() . '] ' . $e->getMessage() . '<br/>';
             }
         }
-
-        $message .= 'تعداد ' . $success . ' تصویر با موفقیت در سیستم ثبت شد.' . '<br/>';
-        Bz_Import_Export_For_Woo_Basic_Logwriter::write_log('دریافت عکس', 'Success ', ($message));
-
-
-        if (!empty($errors)) {
-            $message .= 'تعداد ' . $errors . ' تصویر با خطا مواجه شد. شامل:' . '<br/>';
-            $message .= $error_message;
-            Bz_Import_Export_For_Woo_Basic_Logwriter::write_log('خطا در دریافت عکس', 'Error ', ($message));
-        }
-        return array('success' => true, 'message' => $message);
     }
+
+    $message .= 'تعداد ' . $success . ' تصویر با موفقیت در سیستم ثبت شد.<br/>';
+    Bz_Import_Export_For_Woo_Basic_Logwriter::write_log('دریافت عکس', 'Success ', ($message));
+
+    if (!empty($errors)) {
+        $message .= 'تعداد ' . $errors . ' تصویر با خطا مواجه شد:<br/>' . $error_message;
+        Bz_Import_Export_For_Woo_Basic_Logwriter::write_log('خطا در دریافت عکس', 'Error ', ($message));
+    }
+
+    return array('success' => true, 'message' => $message);
+}
 
     private function prepare_product_for_creation(&$data, $extraData = null, $sched = false)
     {
@@ -2905,6 +2945,11 @@ class BazaraApi
             $total_amount /= 10;
         }
 
+        $description = $order->get_customer_note();
+        if (empty($description)) {
+            $description = $order->get_meta( 'info' );
+        }
+
         $product_orders['orders'] =
             array(
                 'latitude' => 0,
@@ -2913,7 +2958,7 @@ class BazaraApi
                 'deliveryDate' => $completed_date,
                 'personId' => (int)$user_person['personId'],
                 'orderDate' => $completed_date,
-                'description' =>   $order->get_customer_note(),
+                'description' => $description,
                 'discount' =>  $total_discount,
                 'discountType' =>  0,
                 'visitorId' =>   $visitorId,
@@ -3139,5 +3184,174 @@ class BazaraApi
         }
 
         return null;
+    }
+
+    private function sync_combined_products($token, $min = 0, $max = 20)
+    {
+        // Get latest versions for all related entities
+        $product_latest_rv = empty(get_last_row_version("product")) ? 0 : (get_last_row_version("product"));
+        $productDetail_latest_rv = empty(get_last_row_version("productDetail")) ? 0 : (get_last_row_version("productDetail"));
+        $visitorProducts_latest_rv = empty(get_last_row_version("VisitorProducts")) ? 0 : (get_last_row_version("VisitorProducts"));
+
+        // Prepare combined data
+        $data = array(
+            "fromProductVersion" => $product_latest_rv,
+            "fromProductDetailVersion" => $productDetail_latest_rv,
+            "fromVisitorProductVersion" => $visitorProducts_latest_rv
+        );
+
+        $product_result = $this->get_all_data($token, $data);
+        if (!$product_result['success'])
+            return array('count' => 0, 'error' => $product_result['message'], 'success' => false);
+
+        $this->visitor_options = get_bazara_visitor_options();
+        $this->visitor_settings = get_bazara_visitor_settings();
+        $this->plugin_options = bazara_get_options();
+        if (empty($this->visitor_options['StoreID'])) {
+            return false;
+        }
+
+        // Get tax and charge percent from settings
+        $ChargePercent = 0;
+        $TaxPercent = 0;
+        $visitorSettings = get_option('bazara_visitor_soft_settings', true);
+        if (!empty($visitorSettings) && is_array($visitorSettings)) {
+            foreach ($visitorSettings as $setting) {
+                if (intval($setting['SettingCode']) === 14000)
+                    $ChargePercent = intval($setting['Value']);
+                if (intval($setting['SettingCode']) === 14001)
+                    $TaxPercent = intval($setting['Value']);
+            }
+        }
+
+        // Process Products
+        if (!empty($product_result['message']['Products'])) {
+            $Products = $product_result['message']['Products'];
+            usort($Products, function ($item1, $item2) {
+                if ($item1['RowVersion'] == $item2['RowVersion']) return 0;
+                return $item1['RowVersion'] < $item2['RowVersion'] ? -1 : 1;
+            });
+
+            $index = 0;
+            foreach ($Products as $product) {
+                $index++;
+                if ($index <= $min) continue;
+                if ($index > $max) break;
+
+                // Handle tax and charge percent
+                if (intval($product['TaxPercent']) != -1) {
+                    if (intval($product['TaxPercent']) === 0) {
+                        $product['ChargePercent'] = $ChargePercent;
+                        $product['TaxPercent'] = $TaxPercent;
+                    }
+                    $tax = intval($product['TaxPercent']) + intval($product['ChargePercent']);
+                    $taxClass = $this->create_woo_tax($tax);
+                }
+
+                // Process product data
+                $product_items = array(
+                    'ProductId' => $product['ProductId'],
+                    'ProductCode' => $product['ProductCode'],
+                    'ProductName' => ($product['Name']),
+                    'Status' => isset($this->visitor_settings['publishStatus']) ? $this->visitor_settings['publishStatus'] : 'publish',
+                    'Category' => $product['ProductCategoryId'],
+                    'TaxPercent' => ($product['TaxPercent'] == '-1' ? 0 : $product['TaxPercent']),
+                    'ChargePercent' => ($product['ChargePercent'] == '-1' ? 0 : $product['ChargePercent']),
+                    'tax' => (empty($taxClass) ? '' : $taxClass),
+                    'store_id' => $this->visitor_options['StoreID'],
+                    'qty' => 0,
+                    'sku' => $product['ProductCode'],
+                    'width' => $product['Width'],
+                    'weight' => $product['Weight'],
+                    'height' => $product['Height'],
+                    'length' => $product['Length'],
+                    'description' => $product['Description'],
+                    'RowVersion' => $product['RowVersion'],
+                    'unitName1' => $product['UnitName'],
+                    'unitName2' => $product['UnitName2'],
+                    'unitRatio' => $product['UnitRatio'],
+                    'Deleted' => $product['Deleted'] ? 1 : 0,
+                );
+
+                insert('bazara_products', $product_items, 'ProductId', $product['ProductId']);
+                bazara_update_latest_versions('product', $product['RowVersion']);
+                update_schedule_sync($product['ProductId'], 'detailSync', 0);
+            }
+        }
+
+        // Process ProductDetails
+        if (!empty($product_result['message']['ProductDetails'])) {
+            $ProductDetails = $product_result['message']['ProductDetails'];
+            usort($ProductDetails, function ($item1, $item2) {
+                if ($item1['RowVersion'] == $item2['RowVersion']) return 0;
+                return $item1['RowVersion'] < $item2['RowVersion'] ? -1 : 1;
+            });
+
+            $index = 0;
+            foreach ($ProductDetails as $productdetail) {
+                $index++;
+                if ($index <= $min) continue;
+                if ($index > $max) break;
+
+                $pricesList = $Discounts = [];
+                for ($i = 1; $i <= 10; $i++) {
+                    if (!empty($productdetail["Price{$i}"]))
+                        $pricesList[$i]["Price{$i}"] = $productdetail["Price{$i}"];
+                    if (isset($productdetail["Discount{$i}"]) && !empty($productdetail["Discount{$i}"]))
+                        $Discounts[$i]["Discount{$i}"] = $productdetail["Discount{$i}"];
+                }
+
+                $product_items = array(
+                    'ProductId' => $productdetail['ProductId'],
+                    'ProductDetailId' => $productdetail['ProductDetailId'],
+                    'Properties' => ($productdetail['Properties']),
+                    'Prices' => json_encode($pricesList),
+                    'Discounts' => json_encode($Discounts),
+                    'DefaultDiscountLevel' => $productdetail['DefaultDiscountLevel'],
+                    'DefaultSellPriceLevel' => $productdetail['DefaultSellPriceLevel'],
+                    'RowVersion' => $productdetail['RowVersion'],
+                    'Deleted' => $productdetail['Deleted'] ? 1 : 0,
+                );
+
+                insert('bazara_product_details', $product_items, 'ProductDetailId', $productdetail['ProductDetailId']);
+                bazara_update_latest_versions('productDetail', $productdetail['RowVersion']);
+                $ProductID = get_product_id($productdetail['ProductDetailId']);
+                update_schedule_sync($ProductID, 'priceSync', 0);
+                update_schedule_sync($ProductID, 'detailSync', 0);
+                update_schedule_sync($productdetail['ProductDetailId'], 'isSync', 0, 'bazara_product_details', 'ProductDetailId');
+                if (!empty($productdetail['Barcode']))
+                    update_barcode($ProductID, $productdetail['Barcode']);
+            }
+        }
+
+        // Process VisitorProducts
+        if (!empty($product_result['message']['VisitorProducts'])) {
+            $VisitorProducts = $product_result['message']['VisitorProducts'];
+            usort($VisitorProducts, function ($item1, $item2) {
+                if ($item1['RowVersion'] == $item2['RowVersion']) return 0;
+                return $item1['RowVersion'] < $item2['RowVersion'] ? -1 : 1;
+            });
+
+            $index = 0;
+            foreach ($VisitorProducts as $visitorProduct) {
+                $index++;
+                if ($index <= $min) continue;
+                if ($index > $max) break;
+
+                $product_items = array(
+                    'VisitorProductId' => $visitorProduct['VisitorProductId'],
+                    'ProductDetailId' => ($visitorProduct['ProductDetailId']),
+                    'VisitorId' => $visitorProduct['VisitorId'],
+                    'Deleted' => ($visitorProduct['Deleted'] == 'true' ? 1 : 0),
+                    'RowVersion' => $visitorProduct['RowVersion'],
+                );
+
+                insert('bazara_visitor_products', $product_items, 'VisitorProductId', $visitorProduct['VisitorProductId']);
+                $ProductID = get_product_id($visitorProduct['ProductDetailId']);
+                update_schedule_sync($ProductID, 'stockSync', 0);
+            }
+        }
+
+        return array('success' => true, 'message' => '');
     }
 }
