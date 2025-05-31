@@ -2454,13 +2454,8 @@ class BazaraApi
             $wallet = get_order_item_meta_payment_hpos($order_id)->payment_method == 'wallet';
             $order_shipping_cost = get_order_item_shipping_amount_hpos($order_id)->cost;
         }
-        $completed_date = get_post_meta($order_id, '_paid_date', true);
-        if (empty($completed_date)) {
-            $completed_date = $ps->post_date;
-        }
-        
-        // Always convert date to Gregorian format using jalali_to_datetimestamp
-        $completed_date = jalali_to_datetimestamp($completed_date);
+ 
+        $completed_date = get_order_completion_date($order_id);
 
         if (!$hpos_enable)
             $order_number = get_post_meta($order_id, '_order_number', true);
