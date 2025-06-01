@@ -3,6 +3,8 @@
  َAuthor : Erfan Nazari
  */
 
+use Morilog\Jalali\CalendarUtils;
+
 if (! defined('ABSPATH')) {
     exit;
 }
@@ -3296,32 +3298,15 @@ function bazara_is_rtl($string)
 function jalali_to_datetimestamp($date, $first = true)
 {
     date_default_timezone_set('Asia/Tehran');
-    
-    // If date is already in Gregorian format (contains -), return as is
-    if (strpos($date, '-') !== false) {
-        return $date;
-    }
-    
-    // If date is in Persian format (contains /), convert it
-    if (strpos($date, '/') !== false) {
-        $time = explode('/', $date);
-        $gregorian = jalali_to_gregorian($time[0], $time[1], $time[2], '-');
-        return $gregorian . ' ' . date('H:i:s', strtotime($date));
-    }
-    
-    // If date is in timestamp format, convert to Gregorian
-    if (is_numeric($date)) {
-        return date('Y-m-d H:i:s', $date);
-    }
-    
-    // If none of the above, try to parse the date
-    $timestamp = strtotime($date);
-    if ($timestamp !== false) {
-        return date('Y-m-d H:i:s', $timestamp);
-    }
-    
-    // If all else fails, return current date in Gregorian format
-    return date('Y-m-d H:i:s');
+    $time = explode('/', $date);
+    $gregorian = jalali_to_gregorian($time[0], $time[1], $time[2], '/');
+    /* $gregorian = explode('/', $gregorian);
+         if ($first)
+             $timeNow = mktime(0, 0, 0, $gregorian[1], $gregorian[2], $gregorian[0]);
+         else
+             $timeNow = mktime(23, 59, 59, $gregorian[1], $gregorian[2], $gregorian[0]);*/
+
+    return $gregorian . ' ' . date('H:i:s', time());
 }
 
 // add_action('woocommerce_new_order', 'update_order_id_greater_than_on_new_order', 10, 2);
@@ -3394,100 +3379,18 @@ function is_order_status_valid($order_id)
     return in_array($status, $valid_statuses, true);
 }
 
-function jalali_to_gregorian($j_y, $j_m, $j_d, $mod = '') {
-    $g_days_in_month = array(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
-    $j_days_in_month = array(31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29);
+function normalize_datetime_to_gregorian($datetime_shamsi_or_miladi) {
+    // جدا کردن تاریخ و ساعت
+    list($date_part, $time_part) = explode(' ', $datetime_shamsi_or_miladi);
 
-    $jy = $j_y - 979;
-    $jm = $j_m - 1;
-    $jd = $j_d - 1;
-
-    $j_day_no = 365 * $jy + floor($jy / 33) * 8 + floor(($jy % 33 + 3) / 4);
-    for ($i = 0; $i < $jm; ++$i)
-        $j_day_no += $j_days_in_month[$i];
-
-    $j_day_no += $jd;
-
-    $g_day_no = $j_day_no + 79;
-
-    $gy = 1600 + 400 * floor($g_day_no / 146097);
-    $g_day_no = $g_day_no % 146097;
-
-    $leap = true;
-    if ($g_day_no >= 36525) {
-        $g_day_no--;
-        $gy += 100 * floor($g_day_no / 36524);
-        $g_day_no = $g_day_no % 36524;
-
-        if ($g_day_no >= 365)
-            $g_day_no++;
-        else
-            $leap = false;
+    // اگر تاریخ شمسی بود (شروع با 13 یا 14)
+    if (preg_match('/^13\d{2}-\d{2}-\d{2}$/', $date_part) || preg_match('/^14\d{2}-\d{2}-\d{2}$/', $date_part)) {
+        list($y, $m, $d) = explode('-', $date_part);
+        $miladi_date = CalendarUtils::toGregorian((int)$y, (int)$m, (int)$d);
+        $converted_date = implode('-', $miladi_date);
+        return $converted_date . ' ' . $time_part;
     }
 
-    $gy += 4 * floor($g_day_no / 1461);
-    $g_day_no %= 1461;
-
-    if ($g_day_no >= 366) {
-        $leap = false;
-        $g_day_no--;
-        $gy += floor($g_day_no / 365);
-        $g_day_no = $g_day_no % 365;
-    }
-
-    for ($i = 0; $g_day_no >= $g_days_in_month[$i] + ($i == 1 && $leap); $i++)
-        $g_day_no -= $g_days_in_month[$i] + ($i == 1 && $leap);
-    $gm = $i + 1;
-    $gd = $g_day_no + 1;
-
-    return ($mod === '') ? array($gy, $gm, $gd) : $gy . $mod . $gm . $mod . $gd;
-}
-
-function get_order_completion_date($order_id) {
-    // Get the order object
-    $order = wc_get_order($order_id);
-    if (!$order) {
-        return false;
-    }
-
-    // Try to get the paid date first (most reliable for completed orders)
-    $completed_date = $order->get_date_paid();
-    
-    // If no paid date, try to get the completion date
-    if (!$completed_date) {
-        $completed_date = $order->get_date_completed();
-    }
-    
-    // If still no date, try to get the order creation date
-    if (!$completed_date) {
-        $completed_date = $order->get_date_created();
-    }
-    
-    // If we have a date, ensure it's in the correct format
-    if ($completed_date) {
-        // Convert to GMT/UTC to ensure consistent timezone
-        $completed_date = $completed_date->date('Y-m-d H:i:s');
-        
-        // Check if the date is in Persian format (contains Persian numbers or is in Persian format)
-        if (preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}/', $completed_date)) {
-            // Extract date and time parts
-            $date_parts = explode(' ', $completed_date);
-            $date_only = $date_parts[0];
-            $time_only = isset($date_parts[1]) ? $date_parts[1] : '00:00:00';
-            
-            // Split the date into year, month, and day
-            list($year, $month, $day) = explode('-', $date_only);
-            
-            // Convert Persian date to Gregorian
-            $gregorian = jalali_to_gregorian($year, $month, $day, '-');
-            if ($gregorian) {
-                // Format the final date with the original time
-                $completed_date = $gregorian . ' ' . $time_only;
-            }
-        }
-        
-        return $completed_date;
-    }
-    
-    return false;
+    // اگر میلادی بود، همون رو برگردون
+    return $datetime_shamsi_or_miladi;
 }

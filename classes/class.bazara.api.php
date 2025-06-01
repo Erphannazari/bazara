@@ -2455,7 +2455,13 @@ class BazaraApi
             $order_shipping_cost = get_order_item_shipping_amount_hpos($order_id)->cost;
         }
  
-        $completed_date = get_order_completion_date($order_id);
+        $completed_date = get_post_meta($order_id, '_paid_date', true);
+        if (empty($completed_date)) {
+            $completed_date = $ps->post_date;
+        }
+
+        $completed_date = normalize_datetime_to_gregorian($completed_date);
+        bazara_save_log(date_i18n('Y-m-j'), 'completed date', $completed_date, 'test');
 
         if (!$hpos_enable)
             $order_number = get_post_meta($order_id, '_order_number', true);

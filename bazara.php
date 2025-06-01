@@ -18,6 +18,12 @@
 * @author Erfan Nazari
 * @copyright Copyright (c) 2022, mahaksoft
 **/
+
+// Load Composer autoloader
+if (file_exists(__DIR__ . '/vendor/autoload.php')) {
+    require_once __DIR__ . '/vendor/autoload.php';
+}
+
 // disable direct file access
 if ( ! defined( 'ABSPATH' ) ) {
     exit;

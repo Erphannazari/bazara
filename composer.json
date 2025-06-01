@@ -1,0 +1,14 @@
+{
+    "name": "bazara/bazara",
+    "description": "Bazara Project",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "morilog/jalali": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Bazara\\": "classes/"
+        }
+    }
+} 
