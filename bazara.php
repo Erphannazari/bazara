@@ -7,7 +7,7 @@
 * Author URI: https://www.mahaksoft.com/
 * Text Domain: bazara
 * Domain Path: /languages
-* Version: 3.1040 (beta)
+* Version: 3.1039
 * WC requires at least: 5.0.0
 * WC tested up to: 9.4.1
 * Requires at least: 5.8
@@ -41,10 +41,10 @@ function bazara_check_woocommerce() {
 // Admin notice for missing WooCommerce
 function bazara_woocommerce_missing_notice() {
     ?>
-<div class="error">
-    <p><?php _e('بازارا نیاز به افزونه ووکامرس دارد. لطفا ابتدا ووکامرس را نصب و فعال کنید.', 'bazara'); ?></p>
-</div>
-<?php
+    <div class="error">
+        <p><?php _e('بازارا نیاز به افزونه ووکامرس دارد. لطفا ابتدا ووکامرس را نصب و فعال کنید.', 'bazara'); ?></p>
+    </div>
+    <?php
 }
 
 // Prevent plugin activation if WooCommerce is not active
