@@ -242,22 +242,21 @@ class Bazara_Products_List extends WP_List_Table
 
 	public function process_bulk_action()
 	{
-
 		$actions = ['detailSync', 'stockSync', 'priceSync', 'all'];
 		$bulkAction = str_replace('bulk-', '', $this->current_action());
 		//Detect when a bulk action is being triggered...
 		if (in_array($bulkAction, $actions)) {
-
 			// In our file that handles the request, verify the nonce.
-
 			$sync_ids = esc_sql($_POST["bulk-detailSync"]);
+			
 			// loop over the array of record IDs and delete them
 			foreach ($sync_ids as $id) {
 				self::sync_products(absint($id), $bulkAction);
 			}
 
 			$bazara = new BazaraApi(true);
-			$result = $bazara->start_sync_new_product(0, 100000, true);
+			// Only sync the selected products
+			$result = $bazara->start_sync_new_product(0, 100000, true, $sync_ids);
 			
 			if (isset($result['message']) && !empty($result['message'])) {
 				// Store the message in a transient
@@ -278,10 +277,10 @@ class Bazara_Products_List extends WP_List_Table
 		$message = get_transient('bazara_sync_message');
 		if ($message) {
 			?>
-			<div class="notice notice-success is-dismissible">
-				<p><?php echo wp_kses_post(nl2br($message)); ?></p>
-			</div>
-			<?php
+<div class="notice notice-success is-dismissible">
+    <p><?php echo wp_kses_post(nl2br($message)); ?></p>
+</div>
+<?php
 			// Delete the transient after displaying
 			delete_transient('bazara_sync_message');
 		}

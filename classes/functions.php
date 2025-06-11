@@ -351,7 +351,7 @@ function get_products($all = false, $min = 0, $schedule = false)
     $query = "SELECT * FROM {$wpdb->prefix}bazara_products where Deleted = 0 AND (queue = 0 or queue IS NULL)  {$cond2} order by ProductID {$cond} ";
     return $wpdb->get_results($query);
 }
-function get_products_v3($all = false, $min = 0, $max = 10000, $schedule = false)
+function get_products_v3($all = false, $min = 0, $max = 10000, $schedule = false, $selected_ids = null)
 {
     global  $wpdb;
 
@@ -372,7 +372,14 @@ function get_products_v3($all = false, $min = 0, $max = 10000, $schedule = false
 
     $cond2 .= ' )';
 
-    $query = "SELECT * FROM {$wpdb->prefix}bazara_products where Deleted = 0 AND (queue = 0 or queue IS NULL)  {$cond2} order by ProductID {$cond} ";
+    // If selected_ids is provided, only get those products
+    if ($selected_ids !== null) {
+        $ids = implode(',', array_map('intval', $selected_ids));
+        $query = "SELECT * FROM {$wpdb->prefix}bazara_products where Deleted = 0 AND (queue = 0 or queue IS NULL) AND ProductCode IN ({$ids}) {$cond2} order by ProductID {$cond} ";
+    } else {
+        $query = "SELECT * FROM {$wpdb->prefix}bazara_products where Deleted = 0 AND (queue = 0 or queue IS NULL) {$cond2} order by ProductID {$cond} ";
+    }
+    
     return $wpdb->get_results($query);
 }
 function get_banks()

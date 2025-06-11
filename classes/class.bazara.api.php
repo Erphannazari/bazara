@@ -638,9 +638,8 @@ class BazaraApi
 
         return $StoreID;
     }
-    public function start_sync_new_product($min = 0, $max = 20, $schd = false)
+    public function start_sync_new_product($min = 0, $max = 20, $schd = false, $selected_ids = null)
     {
-
         try {
             global $Qauntity;
             $error_message = "";
@@ -648,7 +647,14 @@ class BazaraApi
             $success = 0;
             $errors = 0;
             $ProductArray = [];
-            $products = get_products_v3(false, $min, $max, $schd);
+            
+            // If selected_ids is provided, only get those products
+            if ($selected_ids !== null) {
+                $products = get_products_v3(false, $min, $max, $schd, $selected_ids);
+            } else {
+                $products = get_products_v3(false, $min, $max, $schd);
+            }
+            
             $properties = get_properties();
             $extraDatas = get_extras();
             $Qauntity = class_exists('bazara_ratio_calculator') ? 'Count2' : 'Count1';
