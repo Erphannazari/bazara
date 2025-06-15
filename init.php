@@ -46,9 +46,9 @@ class bazara
 
         require_once plugin_dir_path( __FILE__ ) . 'classes/class.bazara.lang.php';
 
-        require_once plugin_dir_path(__FILE__) . 'libs/jalali/CalendarUtils.php';
-        require_once plugin_dir_path(__FILE__) . 'libs/jalali/Jalalian.php';
         require_once plugin_dir_path(__FILE__) . 'libs/jalali/Converter.php';
+        require_once plugin_dir_path(__FILE__) . 'libs/jalali/Jalalian.php';
+        require_once plugin_dir_path(__FILE__) . 'libs/jalali/CalendarUtils.php';
         require_once plugin_dir_path(__FILE__) . 'libs/jalali/helpers.php';
 
 
