@@ -1817,8 +1817,6 @@ class BazaraApi
 
                     // تأیید تصویر شاخص (برای دیباگ)
                     $new_thumbnail_id = get_post_thumbnail_id($objProduct->get_id());
-                    var_dump(wp_get_attachment_url($new_thumbnail_id));
-                    die;
 
                     $success++;
                     update_picture_status($pic['PictureId']);
@@ -2216,7 +2214,11 @@ class BazaraApi
         $datas = $this->convert_user_to_people($user, 0, $personGroup);
 
         $result = $this->set_all_data($token, array('people' => array($datas['people']), 'visitorPeople' => array($datas['visitor'])));
-        $result_ids = json_decode($result, true)['data']['Data']['Objects']['People']['Results'];
+        $result_array = json_decode($result, true);
+        if (!$result_array['success']) {
+            return false;
+        }
+        $result_ids = $result_array['data']['Data']['Objects']['People']['Results'];
         update_user_meta($user->ID, 'mahak_id', $result_ids[0]['EntityId']);
         update_user_meta($user->ID, 'role', 'customer');
     }
