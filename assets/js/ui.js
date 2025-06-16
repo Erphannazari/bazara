@@ -363,9 +363,12 @@ function check_login_sync(){
                 jQuery('#bazaraModalSeoConfirmDataSync').val(response.checkShouldSync)
                 jQuery('#bazaraModalSeoConfirmDataLogin').val(response.checkShouldLogin)
             }
-            else if(response.checkShouldSync){
+            else if(response.checkShouldSync && response.checkShouldLogin){
                 jQuery('#bazaraModalSupportLogin').fadeIn();
                 jQuery("#modalCallbackForm").val('syncForm')
+            }
+            else if(response.checkShouldSync){
+                save_form_setting();
             }
             else{
                 showBazaraErrorMessage('تغییری لحاظ نشد');
