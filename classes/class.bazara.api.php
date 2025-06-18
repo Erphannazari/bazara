@@ -1731,6 +1731,56 @@ class BazaraApi
     $success = 0;
     $errors = 0;
 
+    // دریافت تصاویر حذف شده
+    global $wpdb;
+    $deleted_pictures_query = "SELECT {$wpdb->prefix}bazara_pictures.PictureId as PictureId,
+                                     {$wpdb->prefix}bazara_photo_gallery.ItemCode as ItemCode
+                              FROM {$wpdb->prefix}bazara_pictures 
+                              JOIN {$wpdb->prefix}bazara_photo_gallery 
+                              ON {$wpdb->prefix}bazara_pictures.PictureId = {$wpdb->prefix}bazara_photo_gallery.PictureId 
+                              WHERE {$wpdb->prefix}bazara_pictures.Deleted = 1";
+    
+    $deleted_pictures = $wpdb->get_results($deleted_pictures_query);
+    
+    // حذف تصاویر حذف شده از محصولات
+    foreach ($deleted_pictures as $deleted_pic) {
+        $objProduct = get_product_by_mahakID($deleted_pic->ItemCode);
+        if (!empty($objProduct)) {
+            $product_id = $objProduct->get_id();
+            
+            // جستجوی تصویر با شناسه محک
+            $args = array(
+                'post_status' => 'inherit',
+                'post_type' => 'attachment',
+                'meta_query' => array(
+                    array(
+                        'key' => 'mahak_picture_id',
+                        'value' => $deleted_pic->PictureId
+                    )
+                )
+            );
+            
+            $posts = get_posts($args);
+            if (!empty($posts)) {
+                $attachment_id = $posts[0]->ID;
+                
+                // حذف از تصویر شاخص اگر باشد
+                if (get_post_thumbnail_id($product_id) == $attachment_id) {
+                    $objProduct->set_image_id('');
+                }
+                
+                // حذف از گالری تصاویر
+                $gallery_ids = $objProduct->get_gallery_image_ids();
+                $gallery_ids = array_diff($gallery_ids, array($attachment_id));
+                $objProduct->set_gallery_image_ids($gallery_ids);
+                
+                $objProduct->save();
+                $success++;
+            }
+        }
+    }
+
+    // دریافت و پردازش تصاویر جدید
     $pictures = get_pictures();
     $processed_products = []; // برای ردیابی محصولاتی که پردازش شده‌اند
 
@@ -1749,10 +1799,10 @@ class BazaraApi
 
         // حذف کامل تصویر شاخص و گالری برای محصول
         if (!isset($processed_products[$product_id])) {
-            // حذف تصویر شاخص
-            delete_post_meta($product_id, '_thumbnail_id');
-            // حذف گالری تصاویر
-            delete_post_meta($product_id, '_product_image_gallery');
+            // حذف تصویر شاخص و گالری با استفاده از متدهای ووکامرس
+            $objProduct->set_image_id(''); // حذف تصویر شاخص
+            $objProduct->set_gallery_image_ids(array()); // حذف گالری تصاویر
+            $objProduct->save(); // ذخیره تغییرات
             $processed_products[$product_id] = true;
         }
 
@@ -1814,9 +1864,6 @@ class BazaraApi
                     }
 
                     $objProduct->save();
-
-                    // تأیید تصویر شاخص (برای دیباگ)
-                    $new_thumbnail_id = get_post_thumbnail_id($objProduct->get_id());
 
                     $success++;
                     update_picture_status($pic['PictureId']);

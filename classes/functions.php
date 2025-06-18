@@ -2504,7 +2504,18 @@ function get_orders_address_hpos($orderID = 32220, $address_type = 'shipping') /
 function get_pictures()
 {
     global  $wpdb;
-    $query = "SELECT {$wpdb->prefix}bazara_pictures.RowVersion as RowVersion,{$wpdb->prefix}bazara_pictures.PictureId as PictureId,{$wpdb->prefix}bazara_photo_gallery.ItemCode as ItemCode,{$wpdb->prefix}bazara_pictures.Url as Url FROM {$wpdb->prefix}bazara_pictures JOIN {$wpdb->prefix}bazara_photo_gallery ON {$wpdb->prefix}bazara_pictures.PictureId = {$wpdb->prefix}bazara_photo_gallery.PictureId where ({$wpdb->prefix}bazara_pictures.isSync = 0 or {$wpdb->prefix}bazara_pictures.isSync IS NULL) AND ({$wpdb->prefix}bazara_pictures.queue = 0 or {$wpdb->prefix}bazara_pictures.queue IS NULL) AND  {$wpdb->prefix}bazara_photo_gallery.Deleted = 0   order by {$wpdb->prefix}bazara_pictures.filename ASC,{$wpdb->prefix}bazara_photo_gallery.ItemCode ";
+    $query = "SELECT {$wpdb->prefix}bazara_pictures.RowVersion as RowVersion,
+                     {$wpdb->prefix}bazara_pictures.PictureId as PictureId,
+                     {$wpdb->prefix}bazara_photo_gallery.ItemCode as ItemCode,
+                     {$wpdb->prefix}bazara_pictures.Url as Url 
+              FROM {$wpdb->prefix}bazara_pictures 
+              JOIN {$wpdb->prefix}bazara_photo_gallery 
+              ON {$wpdb->prefix}bazara_pictures.PictureId = {$wpdb->prefix}bazara_photo_gallery.PictureId 
+              WHERE ({$wpdb->prefix}bazara_pictures.isSync = 0 or {$wpdb->prefix}bazara_pictures.isSync IS NULL) 
+              AND ({$wpdb->prefix}bazara_pictures.queue = 0 or {$wpdb->prefix}bazara_pictures.queue IS NULL) 
+              AND {$wpdb->prefix}bazara_photo_gallery.Deleted = 0 
+              AND {$wpdb->prefix}bazara_pictures.Deleted = 0
+              ORDER BY {$wpdb->prefix}bazara_pictures.filename ASC, {$wpdb->prefix}bazara_photo_gallery.ItemCode";
     return $wpdb->get_results($query);
 }
 function update_wp_roles($roles)
