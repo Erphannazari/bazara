@@ -3349,10 +3349,10 @@ class BazaraApi
 
                 $pricesList = $Discounts = [];
                 for ($i = 1; $i <= 10; $i++) {
-                    if (!empty($productdetail["Price{$i}"]))
-                        $pricesList[$i]["Price{$i}"] = $productdetail["Price{$i}"];
-                    if (isset($productdetail["Discount{$i}"]) && !empty($productdetail["Discount{$i}"]))
-                        $Discounts[$i]["Discount{$i}"] = $productdetail["Discount{$i}"];
+                    if (!empty($productdetail["Price{$i}"]));
+                    $pricesList[$i]["Price{$i}"] = $productdetail["Price{$i}"];
+                    if (isset($productdetail["Discount{$i}"]) && !empty($productdetail["Discount{$i}"]));
+                    $Discounts[$i]["Discount{$i}"] = $productdetail["Discount{$i}"];
                 }
 
                 $product_items = array(
