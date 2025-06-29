@@ -12,6 +12,10 @@ Version: 3.1040
 ### Fixed
 - رفع مشکل پر نشدن جدول bazara_product_details به شکل صحیح
 
+### Changed
+- bazaraOptionsNeedSupportAccess تغییر کرد
+- checkShouldLogin بهینه شد
+
 ## [3.1040] - 2025-05-10
 
 ### Added

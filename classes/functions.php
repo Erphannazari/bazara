@@ -683,17 +683,57 @@ add_action('wp_ajax_bazara_save_settings', 'bazara_save_settings');
 
 // start synchoronize options DB
 const bazaraOptionsNeedSupportAccess = [
-    'barcode',
+    'chkProduct',
+    'chkPicture',
+    'chkTitle',
     'chkQuantity',
+    'chkPrice',
     'chkExcludedProductsByCategory',
-    'StorePriorityToggle',
-    'variationVisibilityType',
-    'variation_date_condition',
+    'ExcludedProductsByCategory',
+    'chkCategory',
+    'chkDontRemoveAttributes',
+    'barcode',
+    'description',
     'chkCustomer',
-    'chkBankOrder',
-    'chkLastOrderID',
+    'chkCustomersMahak',
+    'radioCustomer',
+    'generalCustomerID',
+    'guestPersonID',
+    'chkGuestCustomer',
+    'banksMethods',
+    'carrierMethods',
+    // 'chkRegularPrice',
+    // 'chkSalePrice',
+    // 'DiscountPriceOrPercent',
+    // 'RegularPrice',
+    'publishStatus',
+    // 'discount',
     'selectCurrencySoftware',
-    'selectCurrencyPlugin'
+    'selectCurrencyPlugin',
+    'chkBankOrder',
+    'chkShippingOrder',
+    'order_id_greater_than',
+    'chkLastOrderID',
+    'customerGroupID',
+    'variation_date_condition',
+    'variationVisibilityType',
+    'StoresSortOrder',
+    'StorePriorityToggle',
+    // 'dateFirstCond',
+    // 'dateFirstCondPrice',
+    // 'dateFirstCondDiscount',
+    // 'dateSecondCond',
+    // 'dateSecondCondPrice',
+    // 'dateSecondCondDiscount',
+    // 'dateThirdCond',
+    // 'dateThirdCondPrice',
+    // 'dateThirdCondDiscount',
+    // 'bazara_regular_multiprice_price_select',
+    // 'bazara_regular_multiprice_role_select',
+    // 'bazara_regular_multiprice_cheque_select',
+    // 'bazara_regular_multiprice_role_cheque',
+    // 'bazara_regular_multiprice_discount_price_select',
+    // 'bazara_regular_multiprice_role_discount',
 ];
 const bazaraOptionsForSEO = [
     'description' => 'همگام سازی توضیحات کالا',
@@ -769,7 +809,17 @@ function bazara_check_user_access_ajax()
 
     $diffOptionsKeys = recursive_array_diff_keys($setting_Options, $form_Options);
 
-    $checkShouldLogin = !empty(array_intersect($diffOptionsKeys, bazaraOptionsNeedSupportAccess));
+    //$checkShouldLogin = !empty(array_intersect($diffOptionsKeys, bazaraOptionsNeedSupportAccess));
+
+    $checkShouldLogin = false;
+    foreach ($diffOptionsKeys as $diffKey) {
+        foreach (bazaraOptionsNeedSupportAccess as $supportKey) {
+            if (strpos($diffKey, $supportKey) === 0) {
+                $checkShouldLogin = true;
+                break 2; // چون یکی کافیست
+            }
+        }
+    }
 
     $checkShouldSync = !empty($diffOptionsKeys);
 
