@@ -72,8 +72,8 @@ class bazara
        require_once plugin_dir_path( __FILE__ ) . 'classes/class.bazara.api.php';
 
        require_once plugin_dir_path( __FILE__ ) . 'classes/class.products.table.php';
-    //    if(!function_exists('jalali_to_gregorian'))
-    //   require_once plugin_dir_path( __FILE__ ) . 'libs/jdf.php';
+       if(!function_exists('jalali_to_gregorian'))
+      require_once plugin_dir_path( __FILE__ ) . 'libs/jdf.php';
 
       $this->orders = include_once (plugin_dir_path( __FILE__ ) . 'classes/woo/class.woo.orders.php');
       $this->endpoint = include_once (plugin_dir_path( __FILE__ ) . 'classes/woo/class-wc-bazara-endpoint.php');
