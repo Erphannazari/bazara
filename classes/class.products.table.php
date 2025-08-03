@@ -69,6 +69,58 @@ class Bazara_Products_List extends WP_List_Table
 		$a = $wpdb->query($wpdb->prepare("UPDATE {$wpdb->prefix}bazara_products  SET {$cond} WHERE ProductCode=%d", $id));
 	}
 
+	public static function sync_pictures($id)
+	{
+		global $wpdb;
+		$productid = $wpdb->get_var($wpdb->prepare("SELECT productid from {$wpdb->prefix}bazara_products WHERE productCode = %d", $id));
+		$pictureid = $wpdb->get_results($wpdb->prepare("SELECT pictureid from {$wpdb->prefix}bazara_photo_gallery WHERE ItemCode=%d", $productid));
+		foreach ($pictureid as $pic) {
+			$res = $wpdb->query($wpdb->prepare("UPDATE {$wpdb->prefix}bazara_pictures SET isSync = 0 WHERE PictureId = %d", $pic->pictureid));
+		}
+	}
+
+	function get_picture_ids_by_product_codes($sync_ids)
+	{
+		global $wpdb;
+		$productid = $wpdb->get_var($wpdb->prepare("SELECT productid from {$wpdb->prefix}bazara_products WHERE productCode = %d", $sync_ids));
+		$pictureid = $wpdb->get_results($wpdb->prepare("SELECT pictureid from {$wpdb->prefix}bazara_photo_gallery WHERE ItemCode=%d", $productid));
+		
+    	$picture_ids = array();
+    	foreach ($pictureid as $result) {
+        	$picture_ids[] = $result->pictureid;
+    	}
+    
+    	return $picture_ids;
+	}
+
+function delete_product_images_by_sku($sku) {
+    // محصول را با استفاده از SKU پیدا کن
+    $product_id = wc_get_product_id_by_sku($sku);
+    if (!$product_id) {
+        echo "محصولی با این کد پیدا نشد.";
+        return;
+    }
+
+    // تصویر شاخص را حذف کن
+    $thumbnail_id = get_post_thumbnail_id($product_id);
+    if ($thumbnail_id) {
+        wp_delete_attachment($thumbnail_id, true);
+        delete_post_thumbnail($product_id);
+    }
+
+    // گالری تصاویر را دریافت و حذف کن
+    $gallery_image_ids = get_post_meta($product_id, '_product_image_gallery', true);
+    if (!empty($gallery_image_ids)) {
+        $gallery_ids = explode(',', $gallery_image_ids);
+        foreach ($gallery_ids as $image_id) {
+            wp_delete_attachment($image_id, true);
+        }
+        // متای گالری را پاک کن
+        delete_post_meta($product_id, '_product_image_gallery');
+    }
+
+    echo "تصویر شاخص و تصاویر گالری با موفقیت حذف شدند.";
+}
 
 	/**
 	 * Returns the count of records in the database.
@@ -208,6 +260,7 @@ class Bazara_Products_List extends WP_List_Table
 			'bulk-detailSync' => 'detailSync',
 			'bulk-stockSync' => 'stockSync',
 			'bulk-priceSync' => 'priceSync',
+			'bulk-pictureSync' => 'pictureSync',
 			'bulk-all' => 'all',
 
 
@@ -242,8 +295,9 @@ class Bazara_Products_List extends WP_List_Table
 
 	public function process_bulk_action()
 	{
-		$actions = ['detailSync', 'stockSync', 'priceSync', 'all'];
+		$actions = ['detailSync', 'stockSync', 'priceSync', 'all', 'pictureSync'];
 		$bulkAction = str_replace('bulk-', '', $this->current_action());
+		
 		//Detect when a bulk action is being triggered...
 		if (in_array($bulkAction, $actions)) {
 			// In our file that handles the request, verify the nonce.
@@ -251,13 +305,23 @@ class Bazara_Products_List extends WP_List_Table
 			
 			// loop over the array of record IDs and delete them
 			foreach ($sync_ids as $id) {
-				self::sync_products(absint($id), $bulkAction);
+				if($bulkAction == 'pictureSync'){
+					self::delete_product_images_by_sku($id);
+					self::sync_pictures(absint($id));
+				}else{
+					self::sync_products(absint($id), $bulkAction);
+				}
 			}
 
 			$bazara = new BazaraApi(true);
-			// Only sync the selected products
-			$result = $bazara->start_sync_new_product(0, 100000, true, $sync_ids);
-			
+
+			if($bulkAction == 'pictureSync'){
+				$result = $bazara->sync_pictures();
+			}else{
+				// Only sync the selected products
+				$result = $bazara->start_sync_new_product(0, 100000, true, $sync_ids);
+			}
+
 			if (isset($result['message']) && !empty($result['message'])) {
 				// Store the message in a transient
 				set_transient('bazara_sync_message', $result['message'], 45);
