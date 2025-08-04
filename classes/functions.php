@@ -683,17 +683,57 @@ add_action('wp_ajax_bazara_save_settings', 'bazara_save_settings');
 
 // start synchoronize options DB
 const bazaraOptionsNeedSupportAccess = [
-    'barcode',
+    'chkProduct',
+    'chkPicture',
+    'chkTitle',
     'chkQuantity',
+    'chkPrice',
     'chkExcludedProductsByCategory',
-    'StorePriorityToggle',
-    'variationVisibilityType',
-    'variation_date_condition',
+    'ExcludedProductsByCategory',
+    'chkCategory',
+    'chkDontRemoveAttributes',
+    'barcode',
+    'description',
     'chkCustomer',
-    'chkBankOrder',
-    'chkLastOrderID',
+    'chkCustomersMahak',
+    'radioCustomer',
+    'generalCustomerID',
+    'guestPersonID',
+    'chkGuestCustomer',
+    'banksMethods',
+    'carrierMethods',
+    // 'chkRegularPrice',
+    // 'chkSalePrice',
+    // 'DiscountPriceOrPercent',
+    // 'RegularPrice',
+    'publishStatus',
+    // 'discount',
     'selectCurrencySoftware',
-    'selectCurrencyPlugin'
+    'selectCurrencyPlugin',
+    'chkBankOrder',
+    'chkShippingOrder',
+    'order_id_greater_than',
+    'chkLastOrderID',
+    'customerGroupID',
+    'variation_date_condition',
+    'variationVisibilityType',
+    'StoresSortOrder',
+    'StorePriorityToggle',
+    // 'dateFirstCond',
+    // 'dateFirstCondPrice',
+    // 'dateFirstCondDiscount',
+    // 'dateSecondCond',
+    // 'dateSecondCondPrice',
+    // 'dateSecondCondDiscount',
+    // 'dateThirdCond',
+    // 'dateThirdCondPrice',
+    // 'dateThirdCondDiscount',
+    // 'bazara_regular_multiprice_price_select',
+    // 'bazara_regular_multiprice_role_select',
+    // 'bazara_regular_multiprice_cheque_select',
+    // 'bazara_regular_multiprice_role_cheque',
+    // 'bazara_regular_multiprice_discount_price_select',
+    // 'bazara_regular_multiprice_role_discount',
 ];
 const bazaraOptionsForSEO = [
     'description' => 'همگام سازی توضیحات کالا',
@@ -769,7 +809,17 @@ function bazara_check_user_access_ajax()
 
     $diffOptionsKeys = recursive_array_diff_keys($setting_Options, $form_Options);
 
-    $checkShouldLogin = !empty(array_intersect($diffOptionsKeys, bazaraOptionsNeedSupportAccess));
+    //$checkShouldLogin = !empty(array_intersect($diffOptionsKeys, bazaraOptionsNeedSupportAccess));
+
+    $checkShouldLogin = false;
+    foreach ($diffOptionsKeys as $diffKey) {
+        foreach (bazaraOptionsNeedSupportAccess as $supportKey) {
+            if (strpos($diffKey, $supportKey) === 0) {
+                $checkShouldLogin = true;
+                break 2; // چون یکی کافیست
+            }
+        }
+    }
 
     $checkShouldSync = !empty($diffOptionsKeys);
 
@@ -2504,7 +2554,18 @@ function get_orders_address_hpos($orderID = 32220, $address_type = 'shipping') /
 function get_pictures()
 {
     global  $wpdb;
-    $query = "SELECT {$wpdb->prefix}bazara_pictures.RowVersion as RowVersion,{$wpdb->prefix}bazara_pictures.PictureId as PictureId,{$wpdb->prefix}bazara_photo_gallery.ItemCode as ItemCode,{$wpdb->prefix}bazara_pictures.Url as Url FROM {$wpdb->prefix}bazara_pictures JOIN {$wpdb->prefix}bazara_photo_gallery ON {$wpdb->prefix}bazara_pictures.PictureId = {$wpdb->prefix}bazara_photo_gallery.PictureId where ({$wpdb->prefix}bazara_pictures.isSync = 0 or {$wpdb->prefix}bazara_pictures.isSync IS NULL) AND ({$wpdb->prefix}bazara_pictures.queue = 0 or {$wpdb->prefix}bazara_pictures.queue IS NULL) AND  {$wpdb->prefix}bazara_photo_gallery.Deleted = 0   order by {$wpdb->prefix}bazara_pictures.filename ASC,{$wpdb->prefix}bazara_photo_gallery.ItemCode ";
+    $query = "SELECT {$wpdb->prefix}bazara_pictures.RowVersion as RowVersion,
+                     {$wpdb->prefix}bazara_pictures.PictureId as PictureId,
+                     {$wpdb->prefix}bazara_photo_gallery.ItemCode as ItemCode,
+                     {$wpdb->prefix}bazara_pictures.Url as Url 
+              FROM {$wpdb->prefix}bazara_pictures 
+              JOIN {$wpdb->prefix}bazara_photo_gallery 
+              ON {$wpdb->prefix}bazara_pictures.PictureId = {$wpdb->prefix}bazara_photo_gallery.PictureId 
+              WHERE ({$wpdb->prefix}bazara_pictures.isSync = 0 or {$wpdb->prefix}bazara_pictures.isSync IS NULL) 
+              AND ({$wpdb->prefix}bazara_pictures.queue = 0 or {$wpdb->prefix}bazara_pictures.queue IS NULL) 
+              AND {$wpdb->prefix}bazara_photo_gallery.Deleted = 0 
+              AND {$wpdb->prefix}bazara_pictures.Deleted = 0
+              ORDER BY {$wpdb->prefix}bazara_pictures.filename ASC, {$wpdb->prefix}bazara_photo_gallery.ItemCode";
     return $wpdb->get_results($query);
 }
 function update_wp_roles($roles)

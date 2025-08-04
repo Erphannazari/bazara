@@ -1731,6 +1731,56 @@ class BazaraApi
     $success = 0;
     $errors = 0;
 
+    // دریافت تصاویر حذف شده
+    global $wpdb;
+    $deleted_pictures_query = "SELECT {$wpdb->prefix}bazara_pictures.PictureId as PictureId,
+                                     {$wpdb->prefix}bazara_photo_gallery.ItemCode as ItemCode
+                              FROM {$wpdb->prefix}bazara_pictures 
+                              JOIN {$wpdb->prefix}bazara_photo_gallery 
+                              ON {$wpdb->prefix}bazara_pictures.PictureId = {$wpdb->prefix}bazara_photo_gallery.PictureId 
+                              WHERE {$wpdb->prefix}bazara_pictures.Deleted = 1";
+    
+    $deleted_pictures = $wpdb->get_results($deleted_pictures_query);
+    
+    // حذف تصاویر حذف شده از محصولات
+    foreach ($deleted_pictures as $deleted_pic) {
+        $objProduct = get_product_by_mahakID($deleted_pic->ItemCode);
+        if (!empty($objProduct)) {
+            $product_id = $objProduct->get_id();
+            
+            // جستجوی تصویر با شناسه محک
+            $args = array(
+                'post_status' => 'inherit',
+                'post_type' => 'attachment',
+                'meta_query' => array(
+                    array(
+                        'key' => 'mahak_picture_id',
+                        'value' => $deleted_pic->PictureId
+                    )
+                )
+            );
+            
+            $posts = get_posts($args);
+            if (!empty($posts)) {
+                $attachment_id = $posts[0]->ID;
+                
+                // حذف از تصویر شاخص اگر باشد
+                if (get_post_thumbnail_id($product_id) == $attachment_id) {
+                    $objProduct->set_image_id('');
+                }
+                
+                // حذف از گالری تصاویر
+                $gallery_ids = $objProduct->get_gallery_image_ids();
+                $gallery_ids = array_diff($gallery_ids, array($attachment_id));
+                $objProduct->set_gallery_image_ids($gallery_ids);
+                
+                $objProduct->save();
+                $success++;
+            }
+        }
+    }
+
+    // دریافت و پردازش تصاویر جدید
     $pictures = get_pictures();
     $processed_products = []; // برای ردیابی محصولاتی که پردازش شده‌اند
 
@@ -1749,10 +1799,10 @@ class BazaraApi
 
         // حذف کامل تصویر شاخص و گالری برای محصول
         if (!isset($processed_products[$product_id])) {
-            // حذف تصویر شاخص
-            delete_post_meta($product_id, '_thumbnail_id');
-            // حذف گالری تصاویر
-            delete_post_meta($product_id, '_product_image_gallery');
+            // حذف تصویر شاخص و گالری با استفاده از متدهای ووکامرس
+            $objProduct->set_image_id(''); // حذف تصویر شاخص
+            $objProduct->set_gallery_image_ids(array()); // حذف گالری تصاویر
+            $objProduct->save(); // ذخیره تغییرات
             $processed_products[$product_id] = true;
         }
 
@@ -1814,11 +1864,6 @@ class BazaraApi
                     }
 
                     $objProduct->save();
-
-                    // تأیید تصویر شاخص (برای دیباگ)
-                    $new_thumbnail_id = get_post_thumbnail_id($objProduct->get_id());
-                    var_dump(wp_get_attachment_url($new_thumbnail_id));
-                    die;
 
                     $success++;
                     update_picture_status($pic['PictureId']);
@@ -2216,7 +2261,11 @@ class BazaraApi
         $datas = $this->convert_user_to_people($user, 0, $personGroup);
 
         $result = $this->set_all_data($token, array('people' => array($datas['people']), 'visitorPeople' => array($datas['visitor'])));
-        $result_ids = json_decode($result, true)['data']['Data']['Objects']['People']['Results'];
+        $result_array = json_decode($result, true);
+        if (!$result_array['success']) {
+            return false;
+        }
+        $result_ids = $result_array['data']['Data']['Objects']['People']['Results'];
         update_user_meta($user->ID, 'mahak_id', $result_ids[0]['EntityId']);
         update_user_meta($user->ID, 'role', 'customer');
     }
@@ -3300,10 +3349,10 @@ class BazaraApi
 
                 $pricesList = $Discounts = [];
                 for ($i = 1; $i <= 10; $i++) {
-                    if (!empty($productdetail["Price{$i}"]))
-                        $pricesList[$i]["Price{$i}"] = $productdetail["Price{$i}"];
-                    if (isset($productdetail["Discount{$i}"]) && !empty($productdetail["Discount{$i}"]))
-                        $Discounts[$i]["Discount{$i}"] = $productdetail["Discount{$i}"];
+                    if (!empty($productdetail["Price{$i}"]));
+                    $pricesList[$i]["Price{$i}"] = $productdetail["Price{$i}"];
+                    if (isset($productdetail["Discount{$i}"]) && !empty($productdetail["Discount{$i}"]));
+                    $Discounts[$i]["Discount{$i}"] = $productdetail["Discount{$i}"];
                 }
 
                 $product_items = array(

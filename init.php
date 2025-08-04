@@ -46,6 +46,11 @@ class bazara
 
         require_once plugin_dir_path( __FILE__ ) . 'classes/class.bazara.lang.php';
 
+        require_once plugin_dir_path(__FILE__) . 'libs/jalali/Converter.php';
+        require_once plugin_dir_path(__FILE__) . 'libs/jalali/Jalalian.php';
+        require_once plugin_dir_path(__FILE__) . 'libs/jalali/CalendarUtils.php';
+        // require_once plugin_dir_path(__FILE__) . 'libs/jalali/helpers.php';
+
 
         if ( is_admin() ) {
             require_once plugin_dir_path( __FILE__ ) . 'admin/bazara.form.php';
@@ -67,8 +72,8 @@ class bazara
        require_once plugin_dir_path( __FILE__ ) . 'classes/class.bazara.api.php';
 
        require_once plugin_dir_path( __FILE__ ) . 'classes/class.products.table.php';
-    //    if(!function_exists('jalali_to_gregorian'))
-    //   require_once plugin_dir_path( __FILE__ ) . 'libs/jdf.php';
+       if(!function_exists('jalali_to_gregorian'))
+      require_once plugin_dir_path( __FILE__ ) . 'libs/jdf.php';
 
       $this->orders = include_once (plugin_dir_path( __FILE__ ) . 'classes/woo/class.woo.orders.php');
       $this->endpoint = include_once (plugin_dir_path( __FILE__ ) . 'classes/woo/class-wc-bazara-endpoint.php');
@@ -172,16 +177,21 @@ class bazara
     public function bazara_settings_tabs_page()
     {
         ?>
-        <div id="wpbody-content">
-            <div class="wrap woocommerce">
-                <nav class="nav-tab-wrapper woo-nav-tab-wrapper">
-                    <a href="?page=bazara_settings_tabs" class="nav-tab <?php echo isset($_GET['tab']) ? '' : 'nav-tab-active'; ?>">لیست محصولات</a>
-                    <a href="?page=bazara_settings_tabs&tab=unsynced_products" class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'unsynced_products' ? 'nav-tab-active' : ''; ?>">لیست محصولات دارای مغایرت</a>
-                    <a href="?page=bazara_settings_tabs&tab=tools" class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'tools' ? 'nav-tab-active' : ''; ?>">ابزار</a>
-                    <a href="?page=bazara_settings_tabs&tab=reports" class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'reports' ? 'nav-tab-active' : ''; ?>">گزارشات</a>
-                </nav>
-                <h1 class="screen-reader-text">ابزار</h1>
-                <?php
+<div id="wpbody-content">
+    <div class="wrap woocommerce">
+        <nav class="nav-tab-wrapper woo-nav-tab-wrapper">
+            <a href="?page=bazara_settings_tabs"
+                class="nav-tab <?php echo isset($_GET['tab']) ? '' : 'nav-tab-active'; ?>">لیست محصولات</a>
+            <a href="?page=bazara_settings_tabs&tab=unsynced_products"
+                class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'unsynced_products' ? 'nav-tab-active' : ''; ?>">لیست
+                محصولات دارای مغایرت</a>
+            <a href="?page=bazara_settings_tabs&tab=tools"
+                class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'tools' ? 'nav-tab-active' : ''; ?>">ابزار</a>
+            <a href="?page=bazara_settings_tabs&tab=reports"
+                class="nav-tab <?php echo isset($_GET['tab']) && $_GET['tab'] == 'reports' ? 'nav-tab-active' : ''; ?>">گزارشات</a>
+        </nav>
+        <h1 class="screen-reader-text">ابزار</h1>
+        <?php
                 $tab = isset($_GET['tab']) ? $_GET['tab'] : '';
                 switch ($tab) {
                     case 'unsynced_products':
@@ -200,9 +210,9 @@ class bazara
 
                 ?>
 
-            </div>
-        </div>
-        <?php
+    </div>
+</div>
+<?php
     }
 
     public function bazara_products_unsynced_list_page()
@@ -216,63 +226,63 @@ class bazara
         $products_table = new Bazara_Unsynced_Products_Table();
         $products_table->prepare_items();
         ?>
-        <div class="wrap">
-            <h2>لیست محصولات  دارای مغایرت</h2>
+<div class="wrap">
+    <h2>لیست محصولات دارای مغایرت</h2>
 
-            <div id="poststuff">
-                <div id="post-body" class="metabox-holder columns-2">
-                    <div id="post-body-content">
-                        <div class="meta-box-sortables ui-sortable">
-                            <form method="post">
-                                <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>">
-                                <?php
+    <div id="poststuff">
+        <div id="post-body" class="metabox-holder columns-2">
+            <div id="post-body-content">
+                <div class="meta-box-sortables ui-sortable">
+                    <form method="post">
+                        <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>">
+                        <?php
                                 $products_table->search_box(__('جستجو', 'textdomain'), 'product_search');
                                 $products_table->display();
                                 ?>
-                            </form>
-                        </div>
-                    </div>
+                    </form>
                 </div>
-                <br class="clear">
             </div>
         </div>
-        <?php
+        <br class="clear">
+    </div>
+</div>
+<?php
     }
 
     public function bazara_settings_tools_page()
     {
         ?>
-        <table class="wc_status_table wc_status_table--tools widefat">
-            <tbody class="tools">
-            <tr>
-                <th>
-                    <strong class="">بازسازی اطلاعات ذخیره شده در جداول بازارا</strong>
-                    <p class="">با اجرای این عملیات ، کلیه اطلاعات بازسازی خواهند شد</p>
-                </th>
-                <form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="POST">
+<table class="wc_status_table wc_status_table--tools widefat">
+    <tbody class="tools">
+        <tr>
+            <th>
+                <strong class="">بازسازی اطلاعات ذخیره شده در جداول بازارا</strong>
+                <p class="">با اجرای این عملیات ، کلیه اطلاعات بازسازی خواهند شد</p>
+            </th>
+            <form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="POST">
 
                 <td class="run-tool">
-                <input type="hidden" name="action" value="bazara_repair_database"/>
+                    <input type="hidden" name="action" value="bazara_repair_database" />
 
-                    <input type="submit"  class="button button-large" value="بازسازی اطلاعات">
+                    <input type="submit" class="button button-large" value="بازسازی اطلاعات">
                 </td>
             </form>
-            </tr>
-            <tr class="">
-                <th >
-                    <strong class="">حذف اطلاعات بدون والد</strong>
-                    <p class=""> با اجرای این عملیات ، کلیه پست های بدون والد حذف خواهند شد</p>
-                </th>
-                <form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="POST">
-                <td class="run-tool" >
-                    <input type="hidden" name="action" value="clear_tables_queue"/>
-                    <input type="submit"  class="button button-large" value="حذف اطلاعات بدون والد">
+        </tr>
+        <tr class="">
+            <th>
+                <strong class="">حذف اطلاعات بدون والد</strong>
+                <p class=""> با اجرای این عملیات ، کلیه پست های بدون والد حذف خواهند شد</p>
+            </th>
+            <form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="POST">
+                <td class="run-tool">
+                    <input type="hidden" name="action" value="clear_tables_queue" />
+                    <input type="submit" class="button button-large" value="حذف اطلاعات بدون والد">
                 </td>
-                </form>
-            </tr>
-            </tbody>
-        </table>
-        <?php
+            </form>
+        </tr>
+    </tbody>
+</table>
+<?php
     }
 
     public function bazara_settings_reports_page()
@@ -286,84 +296,84 @@ class bazara
         $logs_table = new Bazara_Settings_Reports_Table();
 
         ?>
-        <div class="wrap">
-            <h2>لیست گزارش سینک های انجام شده و نشده</h2>
+<div class="wrap">
+    <h2>لیست گزارش سینک های انجام شده و نشده</h2>
 
-            <div id="poststuff">
-                <div id="post-body" class="metabox-holder columns-2">
-                    <div id="post-body-content">
-                        <div class="meta-box-sortables ui-sortable">
-                            <form method="post">
-                                <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>" />
-                                <?php
+    <div id="poststuff">
+        <div id="post-body" class="metabox-holder columns-2">
+            <div id="post-body-content">
+                <div class="meta-box-sortables ui-sortable">
+                    <form method="post">
+                        <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>" />
+                        <?php
                                 $logs_table->prepare_items();
                                 $logs_table->search_box(__('جستجو', 'textdomain'), 'log_search');
                                 $logs_table->display();
                                 ?>
-                            </form>
-                        </div>
-                    </div>
+                    </form>
                 </div>
-                <br class="clear">
             </div>
         </div>
-        <?php
+        <br class="clear">
+    </div>
+</div>
+<?php
     }
 
     public function bazara_settings_products_page()
     {
         ?>
-        <div class="wrap">
-            <h2>لیست محصولات </h2>
+<div class="wrap">
+    <h2>لیست محصولات </h2>
 
-            <div id="poststuff">
-                <div id="post-body" class="metabox-holder columns-2">
-                    <div id="post-body-content">
-                        <div class="meta-box-sortables ui-sortable">
-                            <form method="post">
-                                <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>" />
+    <div id="poststuff">
+        <div id="post-body" class="metabox-holder columns-2">
+            <div id="post-body-content">
+                <div class="meta-box-sortables ui-sortable">
+                    <form method="post">
+                        <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>" />
 
-                                <?php
+                        <?php
                                 $this->products_obj->prepare_items();
                                 $this->products_obj->search_box( 'جستجو', 'search' );
 
                                 $this->products_obj->display();
                                 ?>
-                            </form>
-                        </div>
-                    </div>
+                    </form>
                 </div>
-                <br class="clear">
             </div>
         </div>
-        <?php
+        <br class="clear">
+    </div>
+</div>
+<?php
     }
     public function plugin_settings_page() {
 		?>
-		<div class="wrap">
-			<h2>لیست محصولات </h2>
+<div class="wrap">
+    <h2>لیست محصولات </h2>
 
-			<div id="poststuff">
-				<div id="post-body" class="metabox-holder columns-2">
-					<div id="post-body-content">
-						<div class="meta-box-sortables ui-sortable">
-							<form method="post">
-                            <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>" />
+    <div id="poststuff">
+        <div id="post-body" class="metabox-holder columns-2">
+            <div id="post-body-content">
+                <div class="meta-box-sortables ui-sortable">
+                    <form method="post">
+                        <input type="hidden" name="page" value="<?php echo $_REQUEST['page']; ?>" />
 
-								<?php
+                        <?php
                                 $this->products_obj->prepare_items();
                                 $this->products_obj->search_box( 'جستجو', 'search' );
 
 								$this->products_obj->display();
                                 ?>
-							</form>
-						</div>
-					</div>
-				</div>
-				<br class="clear">
-			</div>
-		</div>
-	<?php
+                    </form>
+                </div>
+            </div>
+        </div>
+        <br class="clear">
+    </div>
+</div>
+<?php
 	}
 
     function load_plugin() {
