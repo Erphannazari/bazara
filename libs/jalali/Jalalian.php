@@ -5,6 +5,10 @@ namespace Morilog\Jalali;
 use Assert\Assertion;
 use Carbon\Carbon;
 
+if (class_exists('Morilog\Jalali\Jalalian', false)) {
+    return;
+}
+
 class Jalalian
 {
     use Converter;

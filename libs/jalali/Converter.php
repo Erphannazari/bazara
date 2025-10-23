@@ -5,6 +5,10 @@ namespace Morilog\Jalali;
 use Carbon\Exceptions\UnitException;
 use Date;
 
+if (trait_exists('Morilog\Jalali\Converter', false)) {
+    return;
+}
+
 /**
  * Trait Converter.
  *

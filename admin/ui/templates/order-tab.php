@@ -256,13 +256,15 @@ $last_order_id = $visitorOption['order_id_greater_than'];
                                                     $shipping_methods = (prefix_get_available_shipping_methods());
                                                     $shipping_methods_json = !empty($shipping_methods_json) ? json_decode($shipping_methods_json,true) : '';
                                                     foreach ( $shipping_methods as $key=>$value ) {
-
-                                                    if ($shipping_methods_json)
-                                                    $selectedShipping = !empty($shipping_methods_json) ? array_search($key,array_column($shipping_methods_json,'method')): false;
+                                                    $selectedShipping = -1;
+                                                    if ( !empty($shipping_methods_json) ) {
+                                                        $foundIndex = array_search($key, array_column($shipping_methods_json,'method'));
+                                                        $selectedShipping = ($foundIndex === false) ? -1 : $foundIndex;
+                                                    }
                                                      ?>
                                                     <tr><td width="5%">
                                                     <div class="input-switch ">
-                                                    <input type="checkbox" <?= !$sync_shipping_toggle ? 'disabled' : '' ?> class="bazara_wp_products_inte shippings" data-gid="<?= $key ?>" <?=  ($selectedShipping >= 0 && (!empty($shipping_methods_json[$selectedShipping]['method']) ? $shipping_methods_json[$selectedShipping]['method'] : '') == $key ? 'checked' : '') ?> data-validation-objects='["shippingPerson_<?= $key ?>"]' name="bazara_new_bank_<?php echo $key ?>_toggle" id="bazara_new_ship_<?php echo $key ?>_toggle">
+                                                    <input type="checkbox" <?= !$sync_shipping_toggle ? 'disabled' : '' ?> class="bazara_wp_products_inte shippings" data-gid="<?= $key ?>" <?= ($selectedShipping >= 0 && !empty($shipping_methods_json[$selectedShipping]['method']) && $shipping_methods_json[$selectedShipping]['method'] == $key) ? 'checked' : '' ?> data-validation-objects='["shippingPerson_<?= $key ?>"]' name="bazara_new_bank_<?php echo $key ?>_toggle" id="bazara_new_ship_<?php echo $key ?>_toggle">
                                                     <label for="bazara_new_ship_<?= $key ?>_toggle" class="small"></label>
                                                     <span class="status_text yes"></span>
                                                     <span class="status_text no"></span>
@@ -273,11 +275,11 @@ $last_order_id = $visitorOption['order_id_greater_than'];
 
                                                     <td>
                                                    <?php if (!empty($shipping_methods_json)) {?>
-                                                    <select <?= $shipping_methods_json[$selectedShipping]['method'] != $key ? 'disabled' : '' ?> class="shippingClass" data-select-id="<?= $key ?>"  name="person" id="shippingPerson_<?= $key ?>">
+                                                    <select <?= ($selectedShipping >= 0 && !empty($shipping_methods_json[$selectedShipping]['method']) && $shipping_methods_json[$selectedShipping]['method'] == $key) ? '' : 'disabled' ?> class="shippingClass" data-select-id="<?= $key ?>"  name="person" id="shippingPerson_<?= $key ?>">
                                                     <?php 
                                                 foreach($persons as $person)
                                                 {?>
-                                                    <option value="<?php echo $person['PersonId'] ?>"  <?=  ($selectedShipping >= 0 && (!empty($shipping_methods_json[$selectedShipping]['name']) ? $shipping_methods_json[$selectedShipping]['name'] : '') == $person['PersonId'] ? 'selected' : '') ?>>
+                                                    <option value="<?php echo $person['PersonId'] ?>"  <?= ($selectedShipping >= 0 && !empty($shipping_methods_json[$selectedShipping]['name']) && $shipping_methods_json[$selectedShipping]['name'] == $person['PersonId']) ? 'selected' : '' ?>>
                                                     <?php echo $person['FirstName'] . ' ' . $person['LastName'] ?>  
                                                     </option>
                                                     

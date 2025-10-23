@@ -93,7 +93,11 @@ class Bazara_WOO_Orders {
     function bazara_custom_status_dropdown_filter() {
         if(!function_exists('get_current_screen'))
             return false;
-        $post_type = get_current_screen()->post_type;
+        $screen = get_current_screen();
+        if (empty($screen) || !isset($screen->post_type)) {
+            return false;
+        }
+        $post_type = $screen->post_type;
         if ('shop_order' === $post_type) {
             $order_statuses = wc_get_order_statuses();
 
@@ -115,7 +119,11 @@ class Bazara_WOO_Orders {
 
         if(!function_exists('get_current_screen'))
         return $args;
-        $post_type = get_current_screen()->post_type;
+        $screen = get_current_screen();
+        if (empty($screen) || !isset($screen->post_type)) {
+            return $args;
+        }
+        $post_type = $screen->post_type;
 
         if (is_admin()) {
             if ( 'shop_order' === $post_type && isset($_GET['order_status']) && $_GET['order_status'] !== '') {
@@ -159,9 +167,7 @@ class Bazara_WOO_Orders {
                 as $legacy_key
             ) {
                 if (!empty($_REQUEST[$legacy_key])) {
-                    $_REQUEST[
-                    "access_key"
-                    ] = sanitize_text_field($_REQUEST[$legacy_key]);
+                    $_REQUEST["access_key"] = sanitize_text_field($_REQUEST[$legacy_key]);
                 }
             }
         }
@@ -194,19 +200,20 @@ class Bazara_WOO_Orders {
             )
         );
         $order = false;
-        if ($_REQUEST["type"] == "log")
-        {
-            $error = get_post_meta($_REQUEST["order_ids"],'mahak_error',true);
+        if ($_REQUEST["type"] == "log") {
+            $error = get_post_meta($_REQUEST["order_ids"], 'mahak_error', true);
             echo $error;
             die;
         }
         $bazaraApi = new BazaraApi(true);
 
         foreach ($order_ids as  $order_id) {
-            $exist = get_post_meta($order_id,'mahak_id',true);
-            if(!empty($exist))
-                continue;
-            $api_result = $bazaraApi->bazara_save_order($order_id,null);
+            $exist = get_post_meta($order_id, 'mahak_id', true);
+            if (!empty($exist)){
+                delete_post_meta($order_id, 'mahak_id');
+                delete_post_meta($order_id, 'mahak_error');
+            }
+            $api_result = $bazaraApi->bazara_save_order($order_id, null);
         }
         die();
     }

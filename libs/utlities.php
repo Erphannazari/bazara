@@ -1,7 +1,4 @@
 <?php
-/*
- َAuthor : Erfan Nazari
- */
 
 if ( ! defined( 'ABSPATH' ) ) {
     exit;

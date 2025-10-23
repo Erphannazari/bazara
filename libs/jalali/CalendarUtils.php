@@ -4,6 +4,10 @@ namespace Morilog\Jalali;
 
 use Carbon\Carbon;
 
+if (class_exists('Morilog\Jalali\CalendarUtils', false)) {
+    return;
+}
+
 /**
  * Class jDateTime
  * @package Morilog\Jalali

@@ -1,7 +1,4 @@
 <?php
-/*
- َAuthor : Erfan Nazari
- */
 
 use Morilog\Jalali\CalendarUtils;
 
@@ -584,7 +581,6 @@ function get_provinces($name = '')
 }
 function get_cities($province = '', $name = '', $type = 'exact')
 {
-
     global  $wpdb;
     $cityLen = strlen($name);
 
@@ -595,6 +591,11 @@ function get_cities($province = '', $name = '', $type = 'exact')
     $provinceLen = strlen($province);
     $query = "SELECT * FROM {$wpdb->prefix}bazara_regions where (ProvinceName LIKE '%{$province}%') {$query}";
     return $wpdb->get_results($query);
+}
+function normalize_persian_string($string) {
+    // تبدیل "ی" فارسی (U+06CC) به "ي" عربی (U+064A)
+    $string = str_replace('ی', 'ي', $string);
+    return $string;
 }
 function get_visitor_products_count($productDetailID = '', $VisitorID = '')
 {
@@ -638,27 +639,6 @@ function bazara_save_log($date, $title, $comment, $is_success)
             '%d'
         )
     );
-}
-add_action('woocommerce_thankyou', 'bazara_woocommerce_thankyou', 10, 1);
-function bazara_woocommerce_thankyou($order_id)
-{
-    $hpos_enable = get_option('woocommerce_custom_orders_table_enabled');
-
-    if (!$hpos_enable)
-        $exist = get_post_meta($order_id, 'mahak_id', true);
-    else {
-        //HPOS
-        $order = wc_get_order($order_id);
-        $exist = $order->get_meta('mahak_id', true);
-    }
-
-    if (!empty($exist)) {
-        return;
-    } else {
-        $bazaraApi = new BazaraApi(true);
-        $api_result = $bazaraApi->bazara_save_order($order_id, null);
-        bazara_save_log(date_i18n('Y-m-j'), 'ارسال اطلاعات سفارش [' . $order_id . '] به سرور', $api_result['message'], $api_result['success']);
-    }
 }
 
 function get_income_commission_from_customer($customer_id)
@@ -890,6 +870,21 @@ function bazara_save_settings()
     }
     update_option('bazara_visitor_settings', $options);
 
+    // Ensure persons sync cron reflects current setting immediately
+    $bazara_options_for_cron = get_option('bazara_options');
+    $cron_minutes = empty($bazara_options_for_cron['refresh_interval']) ? 0 : (int) $bazara_options_for_cron['refresh_interval'];
+    $is_auto_sync_active = !empty($bazara_options_for_cron['active_auto_sync']);
+
+    if (empty($options['chkCustomersMahak'])) {
+        if (function_exists('as_next_scheduled_action') && as_next_scheduled_action('bazara_run_persons_sync')) {
+            as_unschedule_all_actions('bazara_run_persons_sync');
+        }
+    } else if ($is_auto_sync_active && $cron_minutes > 0) {
+        if (function_exists('as_next_scheduled_action') && false === as_next_scheduled_action('bazara_run_persons_sync')) {
+            as_schedule_recurring_action(strtotime("+ $cron_minutes MINUTES"), (MINUTE_IN_SECONDS * $cron_minutes), 'bazara_run_persons_sync');
+        }
+    }
+
     $message = "تنظیمات با موفقیت ثبت شد.";
     wp_send_json(array('result' => $message));
     die();
@@ -910,69 +905,72 @@ function bazara_get_seo_message($options)
 }
 function bazara_convert_request_to_options($hasRequest = false)
 {
-    if (!$hasRequest)
+    if (!$hasRequest) {
         return [];
-    $options = array(
-        'chkProduct'                                => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_sync_product_toggle'])),
-        'chkPicture'                                => toggle_to_boolean(sanitize_text_field($_REQUEST['chkUploadPics'])),
-        'chkTitle'                                  => toggle_to_boolean(sanitize_text_field($_REQUEST['chkTitle'])),
-        'chkQuantity'                               => toggle_to_boolean(sanitize_text_field($_REQUEST['chkQuantity'])),
-        'chkPrice'                                  => toggle_to_boolean(sanitize_text_field($_REQUEST['chkPrice'])),
-        'chkExcludedProductsByCategory'             => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_except_category'])),
-        'ExcludedProductsByCategory'                => (sanitize_text_field($_REQUEST['ExcludedProductsByCategory'])),
-        'chkCategory'                               => (sanitize_text_field($_REQUEST['category'])),
-        'chkDontRemoveAttributes'                   => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_attribute_toggle'])),
-        'barcode'                                   => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_barcode_toggle'])),
-        'description'                               => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_description_toggle'])),
-        'chkCustomer'                               => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_person_toggle'])),
-        'chkCustomersMahak'                         => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_receive_person_toggle'])),
-        'radioCustomer'                             => (sanitize_text_field($_REQUEST['customer'])),
-        'generalCustomerID'                         => (sanitize_text_field($_REQUEST['publicPerson'])),
-        'guestPersonID'                             => (sanitize_text_field($_REQUEST['person'])),
-        'chkGuestCustomer'                          => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_guest_person'])),
-        'banksMethods'                              => (sanitize_text_field($_REQUEST['banksMethods'])),
-        'carrierMethods'                            => (sanitize_text_field($_REQUEST['carrierMethods'])),
-        'chkRegularPrice'                           => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_regular_price_toggle'])),
-        'chkSalePrice'                              => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_sale_price_toggle'])),
-        'DiscountPriceOrPercent'                    => (sanitize_text_field($_REQUEST['discount']) == "percent_discount" ? sanitize_text_field($_REQUEST['btn-percent-discount']) : sanitize_text_field($_REQUEST['btn-price-discount'])),
-        'RegularPrice'                              => (sanitize_text_field($_REQUEST['btn-reg-price'])),
-        'publishStatus'                             => (sanitize_text_field($_REQUEST['btn-check-status'])),
-        'discount'                                  => (sanitize_text_field($_REQUEST['discount'])),
-        'selectCurrencySoftware'                    => (sanitize_text_field($_REQUEST['btn-check-soft-currency'])),
-        'selectCurrencyPlugin'                      => (sanitize_text_field($_REQUEST['btn-check-site-currency'])),
-        'chkBankOrder'                              => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_bank_order_toggle'])),
-        'chkShippingOrder'                          => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_shipping_order_toggle'])),
-        'order_id_greater_than'                    => (!empty($_REQUEST['order_id_greater_than']) && $_REQUEST['order_id_greater_than'] != "0"
-            ? (int) sanitize_text_field($_REQUEST['order_id_greater_than'])
-            : (int) get_option('bazara_visitor_settings', [])['order_id_greater_than']),
-        'chkLastOrderID'                            => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_last_order_id'])),
-        'customerGroupID'                           => sanitize_text_field($_REQUEST['PersonGroup']),
-        'variation_date_condition'                  => sanitize_text_field($_REQUEST['variationDateCondition']),
-        'variationVisibilityType'                   => $_REQUEST['variationVisibilityType'],
-        'StoresSortOrder'                           => $_REQUEST['StorePriorityOrders'],
-        'StorePriorityToggle'                       => $_REQUEST['bazara_anbar_priority'],
-        'dateFirstCond'                             => $_REQUEST['date_first_select'],
-        'dateFirstCondPrice'                        => $_REQUEST['date_first_select_price'],
-        'dateFirstCondDiscount'                     => $_REQUEST['date_first_select_discount'],
-        'dateSecondCond'                            => $_REQUEST['date_second_select'],
-        'dateSecondCondPrice'                       => $_REQUEST['date_second_select_price'],
-        'dateSecondCondDiscount'                    => $_REQUEST['date_second_select_discount'],
-        'dateThirdCond'                             => $_REQUEST['date_third_select'],
-        'dateThirdCondPrice'                        => $_REQUEST['date_third_select_price'],
-        'dateThirdCondDiscount'                     => $_REQUEST['date_third_select_discount'],
-        'bazara_regular_multiprice_price_select'    => $_REQUEST['bazara_regular_multiprice_price_select'],
-        'bazara_regular_multiprice_role_select'     => $_REQUEST['bazara_regular_multiprice_role_select'],
-        'bazara_regular_multiprice_cheque_select'   => $_REQUEST['bazara_regular_multiprice_cheque_select'],
-        'bazara_regular_multiprice_role_cheque'     => $_REQUEST['bazara_regular_multiprice_role_cheque'],
-        'bazara_regular_multiprice_discount_price_select'     => $_REQUEST['bazara_regular_multiprice_discount_price_select'],
-        'bazara_regular_multiprice_role_discount'   => $_REQUEST['bazara_regular_multiprice_role_discount'],
+    }
 
+    $visitor_settings = get_option('bazara_visitor_settings', []);
+
+    $options = array(
+        'chkProduct'        => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_sync_product_toggle'] ?? '')),
+        'chkPicture'        => toggle_to_boolean(sanitize_text_field($_REQUEST['chkUploadPics'] ?? '')),
+        'chkTitle'          => toggle_to_boolean(sanitize_text_field($_REQUEST['chkTitle'] ?? '')),
+        'chkQuantity'       => toggle_to_boolean(sanitize_text_field($_REQUEST['chkQuantity'] ?? '')),
+        'chkPrice'          => toggle_to_boolean(sanitize_text_field($_REQUEST['chkPrice'] ?? '')),
+        'chkExcludedProductsByCategory' => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_except_category'] ?? '')),
+        'ExcludedProductsByCategory'    => sanitize_text_field($_REQUEST['ExcludedProductsByCategory'] ?? ''),
+        'chkCategory'       => sanitize_text_field($_REQUEST['category'] ?? ''),
+        'chkDontRemoveAttributes' => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_attribute_toggle'] ?? '')),
+        'barcode'           => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_barcode_toggle'] ?? '')),
+        'description'       => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_description_toggle'] ?? '')),
+        'chkCustomer'       => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_person_toggle'] ?? '')),
+        'chkCustomersMahak' => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_receive_person_toggle'] ?? '')),
+        'radioCustomer'     => sanitize_text_field($_REQUEST['customer'] ?? ''),
+        'generalCustomerID' => sanitize_text_field($_REQUEST['publicPerson'] ?? ''),
+        'guestPersonID'     => sanitize_text_field($_REQUEST['person'] ?? ''),
+        'chkGuestCustomer'  => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_guest_person'] ?? '')),
+        'banksMethods'      => sanitize_text_field($_REQUEST['banksMethods'] ?? ''),
+        'carrierMethods'    => sanitize_text_field($_REQUEST['carrierMethods'] ?? ''),
+        'chkRegularPrice'   => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_regular_price_toggle'] ?? '')),
+        'chkSalePrice'      => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_sale_price_toggle'] ?? '')),
+        'DiscountPriceOrPercent' => (($_REQUEST['discount'] ?? '') == "percent_discount" 
+            ? sanitize_text_field($_REQUEST['btn-percent-discount'] ?? '') 
+            : sanitize_text_field($_REQUEST['btn-price-discount'] ?? '')),
+        'RegularPrice'      => sanitize_text_field($_REQUEST['btn-reg-price'] ?? ''),
+        'publishStatus'     => sanitize_text_field($_REQUEST['btn-check-status'] ?? ''),
+        'discount'          => sanitize_text_field($_REQUEST['discount'] ?? ''),
+        'selectCurrencySoftware' => sanitize_text_field($_REQUEST['btn-check-soft-currency'] ?? ''),
+        'selectCurrencyPlugin'   => sanitize_text_field($_REQUEST['btn-check-site-currency'] ?? ''),
+        'chkBankOrder'      => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_bank_order_toggle'] ?? '')),
+        'chkShippingOrder'  => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_shipping_order_toggle'] ?? '')),
+        'order_id_greater_than' => (!empty($_REQUEST['order_id_greater_than'] ?? '') && ($_REQUEST['order_id_greater_than'] ?? '0') != "0"
+            ? (int) sanitize_text_field($_REQUEST['order_id_greater_than'])
+            : (int) ($visitor_settings['order_id_greater_than'] ?? 0)),
+        'chkLastOrderID'    => toggle_to_boolean(sanitize_text_field($_REQUEST['bazara_last_order_id'] ?? '')),
+        'customerGroupID'   => sanitize_text_field($_REQUEST['PersonGroup'] ?? ''),
+        'variation_date_condition' => sanitize_text_field($_REQUEST['variationDateCondition'] ?? ''),
+        'variationVisibilityType'  => $_REQUEST['variationVisibilityType'] ?? '',
+        'StoresSortOrder'   => $_REQUEST['StorePriorityOrders'] ?? [],
+        'StorePriorityToggle' => $_REQUEST['bazara_anbar_priority'] ?? '',
+        'dateFirstCond'     => $_REQUEST['date_first_select'] ?? '',
+        'dateFirstCondPrice' => $_REQUEST['date_first_select_price'] ?? '',
+        'dateFirstCondDiscount' => $_REQUEST['date_first_select_discount'] ?? '',
+        'dateSecondCond'    => $_REQUEST['date_second_select'] ?? '',
+        'dateSecondCondPrice' => $_REQUEST['date_second_select_price'] ?? '',
+        'dateSecondCondDiscount' => $_REQUEST['date_second_select_discount'] ?? '',
+        'dateThirdCond'     => $_REQUEST['date_third_select'] ?? '',
+        'dateThirdCondPrice' => $_REQUEST['date_third_select_price'] ?? '',
+        'dateThirdCondDiscount' => $_REQUEST['date_third_select_discount'] ?? '',
+        'bazara_regular_multiprice_price_select'   => $_REQUEST['bazara_regular_multiprice_price_select'] ?? '',
+        'bazara_regular_multiprice_role_select'    => $_REQUEST['bazara_regular_multiprice_role_select'] ?? '',
+        'bazara_regular_multiprice_cheque_select'  => $_REQUEST['bazara_regular_multiprice_cheque_select'] ?? '',
+        'bazara_regular_multiprice_role_cheque'    => $_REQUEST['bazara_regular_multiprice_role_cheque'] ?? '',
+        'bazara_regular_multiprice_discount_price_select' => $_REQUEST['bazara_regular_multiprice_discount_price_select'] ?? '',
+        'bazara_regular_multiprice_role_discount'  => $_REQUEST['bazara_regular_multiprice_role_discount'] ?? '',
     );
 
     return $options;
 }
-// End synchoronize options DB
-
 
 add_action('wp_ajax_nopriv_bazara_save_visitor_setting', 'bazara_save_visitor_setting');
 add_action('wp_ajax_bazara_save_visitor_setting', 'bazara_save_visitor_setting');
@@ -990,7 +988,7 @@ function bazara_save_visitor_setting()
         'password'                          => (sanitize_text_field($_REQUEST['password'])),
         'refresh_interval'                  => sanitize_text_field($_REQUEST['refresh_interval']),
         'active_auto_sync'                  => $active_sync,
-        'publishStatus'                    => sanitize_text_field($_REQUEST['publishStatus']),
+        'publishStatus' => isset($_REQUEST['publishStatus']) ? sanitize_text_field($_REQUEST['publishStatus']) : '',
         'databaseVersion'                  => $options['databaseVersion'],
 
     );
@@ -1040,6 +1038,7 @@ function bazara_save_visitor_setting()
 add_action('bazara_run_product_sync', 'bazara_run_product_synchronize');
 add_action('bazara_run_clean_queue', 'clear_tables_queue');
 add_action('bazara_run_sending_orders', 'send_bazara_orders');
+add_action('bazara_run_persons_sync', 'bazara_run_persons_synchronize');
 
 function bazara_clear_cron()
 {
@@ -1053,6 +1052,10 @@ function bazara_clear_cron()
 
     if (function_exists('as_next_scheduled_action') && as_next_scheduled_action('bazara_run_sending_orders')) {
         as_unschedule_all_actions('bazara_run_sending_orders');
+    }
+
+    if (function_exists('as_next_scheduled_action') && as_next_scheduled_action('bazara_run_persons_sync')) {
+        as_unschedule_all_actions('bazara_run_persons_sync');
     }
 
     if (wp_next_scheduled('mhk_bazara_sched_hook'))
@@ -1071,6 +1074,13 @@ function bazara_run_cron($minutes = 0)
     if (false === as_next_scheduled_action('bazara_run_clean_queue')) {
         as_schedule_recurring_action(strtotime("+ 120 MINUTES"), (MINUTE_IN_SECONDS * 120), 'bazara_run_clean_queue');
     }
+
+    // Schedule persons sync only if enabled in visitor settings
+    $visitorSetting = get_bazara_visitor_settings();
+    $syncPersons = !empty($visitorSetting['chkCustomersMahak']) && $visitorSetting['chkCustomersMahak'];
+    if ($syncPersons && false === as_next_scheduled_action('bazara_run_persons_sync') && $minutes > 0) {
+        as_schedule_recurring_action(strtotime("+ $minutes MINUTES"), (MINUTE_IN_SECONDS * $minutes), 'bazara_run_persons_sync');
+    }
 }
 function bazara_init_cron()
 {
@@ -1084,6 +1094,13 @@ function bazara_init_cron()
     }
     if (false === as_next_scheduled_action('bazara_run_clean_queue')) {
         as_schedule_recurring_action(strtotime("+ 120 MINUTES"), (MINUTE_IN_SECONDS * 120), 'bazara_run_clean_queue');
+    }
+
+    // Ensure persons sync is scheduled only when enabled
+    $visitorSetting = get_bazara_visitor_settings();
+    $syncPersons = !empty($visitorSetting['chkCustomersMahak']) && $visitorSetting['chkCustomersMahak'];
+    if ($syncPersons && false === as_next_scheduled_action('bazara_run_persons_sync') && $minutes > 0) {
+        as_schedule_recurring_action(strtotime("+ $minutes MINUTES"), (MINUTE_IN_SECONDS * $minutes), 'bazara_run_persons_sync');
     }
 }
 add_action('wp_ajax_nopriv_bazara_change_visitor_ajax', 'bazara_change_visitor_ajax');
@@ -1325,11 +1342,23 @@ function create_product($args)
             // Featured (boolean)
             //  $product->set_featured(isset($args['featured']) ? $args['featured'] : false);
 
+            //Skip from nested variable (Customization)
+            $attr = $product->get_attributes();
+            if(is_object($attr[array_key_first($attr)]) && get_class($attr[array_key_first($attr)]) === 'stdClass'){
+                return array('success' => false, 'message' => 'کالای دارای جزئیات نمیتواند بعنوان متغییر یک محصول متغییر همگام سازی شود.');
+            }
 
-
-
-
-
+            //Attribute has null or empty options (Customization)
+            $attributes = wc_prepare_product_attributes($args['attributes'], $product->get_id());
+            foreach ($attributes as $key => $attribute) {
+                $options = $attribute->get_options();
+                if (empty($options)) {
+                    return array(
+                        'success' => false,
+                        'message' => "ویژگی '{$attribute->get_name()}' مقدار options ندارد و امکان همگام‌سازی وجود ندارد."
+                    );
+                }
+            }
 
             // Attributes et default attributes
             if (isset($args['attributes'])  && !empty($args['vars']))
@@ -2178,7 +2207,7 @@ function wc_prepare_product_attributes($attributes, $pid)
 
     if ($KeepLastAttributes) {
 
-        $data = get_product_attributes($pid);
+        $data = get_product_attributes_plugin($pid);
 
         foreach ($data as $taxonomy => $values) {
             $taxonomy_id = wc_attribute_taxonomy_id_by_name($values['name']); // Get taxonomy ID
@@ -2256,7 +2285,7 @@ function wc_prepare_product_attributes($attributes, $pid)
  * Get a list of all the product attributes for a post type.
  * These require a bit more digging into the values.
  */
-function get_product_attributes($product)
+function get_product_attributes_plugin($product)
 {
 
     global $wpdb;
@@ -2416,7 +2445,8 @@ function bazara_run_product_synchronize()
             'Persons',
             'SubCategory',
             'Orders',
-            'OrderDetails'
+            'OrderDetails',
+            'Regions'
         ];
 
         if (class_exists('bazara_addOns'))
@@ -2443,10 +2473,18 @@ function bazara_run_product_synchronize()
         $bazara->bazara_copy_entities("Transactions", 0, 100000);
     }
 
-    if ($syncPersons)
-        $bazara->start_sync_persons();
+    // Persons sync moved to its own cron job (bazara_run_persons_sync)
 
     bazara_save_log(date_i18n('Y-m-j'), ' اتمام همگام سازی', 'end', 'success');
+}
+function bazara_run_persons_synchronize()
+{
+    $visitorSetting = get_bazara_visitor_settings();
+    $syncPersons = !empty($visitorSetting['chkCustomersMahak']) && $visitorSetting['chkCustomersMahak'];
+    if (!$syncPersons) return;
+
+    $bazara = new BazaraApi(true);
+    $bazara->start_sync_persons();
 }
 function send_bazara_orders()
 {
@@ -2528,7 +2566,7 @@ function get_orders_hpos($orderID = 32220)
         FROM `$table_order_item` as p
         LEFT OUTER JOIN `{$wpdb->prefix}postmeta` pm 
         ON (p.id=pm.post_id AND pm.meta_key = 'mahak_id') 
-        WHERE p.status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged')
+        WHERE p.status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping')
         AND p.id >= %d
         AND (pm.meta_key IS NULL)
         ORDER BY p.id ASC", $orderID); // تغییر به مرتب‌سازی صعودی ID
@@ -3000,7 +3038,7 @@ function get_orders($orderID = 32220)
               AND (pm.meta_key IS NULL)) s2 
         ON s2.ID = posts.ID
         WHERE posts.post_type = 'shop_order' 
-        AND posts.post_status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged')
+        AND posts.post_status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping')
         {$where}
         ORDER BY posts.ID ASC", $orderID); // تغییر به مرتب‌سازی صعودی ID
     $results = $wpdb->get_col($query);
@@ -3377,24 +3415,7 @@ function jalali_to_datetimestamp($date, $first = true)
     return $gregorian . ' ' . date('H:i:s', time());
 }
 
-// add_action('woocommerce_new_order', 'update_order_id_greater_than_on_new_order', 10, 2);
-
-// function update_order_id_greater_than_on_new_order($order_id, $order)
-// {
-
-//     bazara_save_log(date_i18n('Y-m-j'), 'testOrder', 'OK', 'error');
-
-//     $options = get_option('bazara_visitor_settings', []);
-
-//     if (isset($options['chkLastOrderID']) && $options['chkLastOrderID']) {
-//         $options['order_id_greater_than'] = (int) $order_id;
-
-//         update_option('bazara_visitor_settings', $options);
-//     }
-// }
-
 add_action('woocommerce_new_order', 'sync_and_update_order_id_greater_than', 10, 2);
-
 function sync_and_update_order_id_greater_than($order_id, $order)
 {
     // دریافت تنظیمات

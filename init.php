@@ -1,7 +1,4 @@
 <?php
-/*
- َAuthor : Erfan Nazari
- */
 
 use bazara_Log\log\tables\bazara_log_Table;
 

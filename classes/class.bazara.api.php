@@ -1,7 +1,5 @@
 <?php
-/*
- َAuthor : Erfan Nazari
- */
+
 if (! defined('ABSPATH')) {
     exit;
 }
@@ -604,11 +602,8 @@ class BazaraApi
                         'Email' => $People['Email'],
                         'Deleted' => ($People['Deleted'] == 'true' ? 1 : 0),
                         'RowVersion' => $People['RowVersion'],
-                        'isSync' => 0,
                         'Mobile' => $People['Mobile'],
                         'Address' => $People['Address'],
-
-
                     );
 
                     insert('bazara_persons', $product_items, 'PersonId', $People['PersonId']);
@@ -1610,7 +1605,16 @@ class BazaraApi
                         if ($item1['RowVersion'] == $item2['RowVersion']) return 0;
                         return $item1['RowVersion'] < $item2['RowVersion'] ? -1 : 1;
                     });
+                    $index = 0;
                     foreach ($Peoples as $People) {
+                        $latesVersion = (empty($latest_rowVersion) ? 0 : ($latest_rowVersion));
+                        if ($People['RowVersion'] == $latesVersion) continue;
+
+                        $index++;
+                        if ($index <= $min)
+                            continue;
+                        if ($index > $max)
+                            break;
 
                         $product_items = array(
                             'PersonId' => $People['PersonId'],
@@ -1622,11 +1626,8 @@ class BazaraApi
                             'Email' => $People['Email'],
                             'Deleted' => ($People['Deleted'] == 'true' ? 1 : 0),
                             'RowVersion' => $People['RowVersion'],
-                            'isSync' => 0,
                             'Mobile' => $People['Mobile'],
                             'Address' => $People['Address'],
-
-
                         );
 
                         insert('bazara_persons', $product_items, 'PersonId', $People['PersonId']);
@@ -1996,9 +1997,9 @@ class BazaraApi
             $productArgs['category_ids'] = $cat_ids;
 
 
-        create_product($productArgs);
+        $res = create_product($productArgs);
 
-        return array('success' => true, 'message' => '');
+        return array('success' => $res['success'], 'message' => $res['message']);
     }
 
 
@@ -2061,97 +2062,149 @@ class BazaraApi
 
         return array('success' => true, 'message' => $message);
     }
-    private function save_update_person($service_person)
-    {
+    /**
+ * ایجاد یا به‌روزرسانی کاربر وردپرسی بر اساس داده‌های شخص ارائه‌شده.
+ *
+ * @param array $service_person آرایه‌ای شامل داده‌های کاربر (PersonId، Email، Mobile، FirstName، LastName، gName و غیره).
+ * @return array آرایه‌ای با کلیدهای 'success' (بولین) و 'message' (رشته) که نتیجه را نشان می‌دهد.
+ */
+private function save_update_person($service_person) {
+    try {
+        // اعتبارسنجی فیلدهای ضروری
+        if (empty($service_person['PersonId']) || empty($service_person['FirstName']) || empty($service_person['LastName'])) {
+            return array('success' => false, 'message' => __('فیلدهای ضروری وجود ندارند.', 'mahak-bazara'));
+        }
 
-        try {
+        $person_id = $service_person['PersonId'];
+        $objPerson = $this->get_person_by_mahakID($person_id);
 
-            $person_id = $service_person['PersonId'];
-            $objPerson = $this->get_person_by_mahakID($person_id);
+        if (empty($objPerson) && !empty($service_person['Email'])) {
+            $objPerson = get_user_by('email', $service_person['Email']);
+        }
 
+        // تعیین نام کاربری
+        if (!empty($service_person['Email'])) {
+            $username = $service_person['Email'];
+        } elseif (!empty($service_person['Mobile'])) {
+            $username = $service_person['Mobile'];
+        } else {
+            return array('success' => false, 'message' => __('نام کاربری نمی‌تواند ایجاد شود زیرا ایمیل و شماره موبایل هر دو خالی هستند.', 'mahak-bazara'));
+        }
 
-            if (empty($objPerson) && !empty($service_person['Email'])) {
-                $objPerson = get_user_by("email", $service_person['Email']);
-            }
+        // بررسی اینکه آیا کاربر administrator است یا نه (قبل از تنظیم نقش)
+        $is_administrator = false;
+        if (!empty($objPerson)) {
+            $is_administrator = in_array('administrator', $objPerson->roles);
+        }
 
-            $current_user_roles = $objPerson->roles;
+        // آماده‌سازی داده‌های کاربر
+        $random_password = wp_generate_password(12, true);
+        $userdata = array(
+            'user_login'   => empty($objPerson) ? $username : $objPerson->user_login,
+            'display_name' => $service_person['FirstName'] . ' ' . $service_person['LastName'],
+            'user_email'   => $service_person['Email'],
+            'first_name'   => $service_person['FirstName'],
+            'last_name'    => $service_person['LastName'],
+            'role'         => $is_administrator ? 'administrator' : (!empty($service_person['gName']) ? $service_person['gName'] : 'customer'),
+        );
 
+        // اگر کاربر موجود است، ID را به $userdata اضافه کن
+        if (!empty($objPerson)) {
+            $userdata['ID'] = $objPerson->ID;
+        } else {
+            $userdata['user_pass'] = $random_password;
+        }
 
-            if (!empty($service_person['Email']))
-                $username = $service_person['Email'];
-            else if (!empty($service_person['Mobile']))
-                $username = $service_person['Mobile'];
-            else
-                return array('success' => false, 'message' => __('Username can not create because Both of Email and Mobile are empty.', 'mahak-bazara'));
+        // ایجاد یا به‌روزرسانی کاربر
+        $user_id = empty($objPerson) ? wp_insert_user($userdata) : wp_update_user($userdata);
 
-
-            $random_password = wp_generate_password($length = 12, $include_standard_special_chars = false);
-            $userdata = array(
-                'user_login'  =>  empty($objPerson) ? $username : $objPerson->user_login,
-                'display_name' =>  $service_person['FirstName'] . ' ' . $service_person['LastName'],
-                'user_email' =>  $service_person['Email'],
-                'first_name' =>  $service_person['FirstName'],
-                'last_name' =>  $service_person['LastName'],
-                'role' =>  !empty($service_person['gName']) ? $service_person['gName'] : 'customer'
-            );
-
-
-            if (empty($objPerson)) {
-                $userdata['user_pass'] = $random_password;
-            }
-
-            global $call_WebService;
-            $call_WebService = true;
-            if (empty($objPerson))
-                $user_id = wp_insert_user($userdata);
-            else
-                $user_id = wp_update_user($userdata);
-
-            update_user_meta($user_id, 'mahak_id', $person_id);
-            update_user_meta($user_id, 'mahak_PersonCode', $service_person['PersonCode']);
-            update_user_meta($user_id, 'mreeir_phone', $service_person['Mobile']);
-
-            if (is_wp_error($user_id)) {
-                $error = "";
-                foreach ($user_id->errors as $key => $value) {
-                    $error .= $key;
+        // مدیریت خطاها
+        if (is_wp_error($user_id)) {
+            $error_code = key($user_id->errors);
+            if (in_array($error_code, ['existing_user_login', 'invalid_user_id'])) {
+                // تلاش برای یافتن کاربر بر اساس نام کاربری یا ایمیل
+                $existing_user = get_user_by('login', $userdata['user_login']);
+                if (!$existing_user && !empty($service_person['Email'])) {
+                    $existing_user = get_user_by('email', $service_person['Email']);
                 }
+                if ($existing_user) {
+                    $user_id = $existing_user->ID;
+                    $userdata['ID'] = $user_id;
+                    $update_result = wp_update_user($userdata);
+                    if (is_wp_error($update_result)) {
+                        return array('success' => false, 'message' => __('به‌روزرسانی کاربر ناموفق بود: ', 'mahak-bazara') . $update_result->get_error_message());
+                    }
+                } else {
+                    return array('success' => false, 'message' => __('کاربر موجود یافت نشد.', 'mahak-bazara'));
+                }
+            } else {
+                // برای سایر خطاها، پیام خطا را برگردان
+                return array('success' => false, 'message' => $user_id->get_error_message());
             }
+        }
 
+        // به‌روزرسانی متادیتای کاربر
+        update_user_meta($user_id, 'mahak_id', $person_id);
+        update_user_meta($user_id, 'mahak_PersonCode', $service_person['PersonCode']);
+        update_user_meta($user_id, 'mreeir_phone', $service_person['Mobile']);
 
-            if (!empty($service_person['Mobile'])) {
-                $service_person['Mobile'] = substr_replace($service_person['Mobile'], "+98", 0, 1);
+        // فرمت‌بندی شماره موبایل و به‌روزرسانی متاهای مرتبط
+        if (!empty($service_person['Mobile']) && preg_match('/^0[0-9]{10}$/', $service_person['Mobile'])) {
+            $service_person['Mobile'] = substr_replace($service_person['Mobile'], '+98', 0, 1);
+            update_user_meta($user_id, 'digits_phone_no', $service_person['Mobile']);
+            update_user_meta($user_id, 'digits_phone', $service_person['Mobile']);
+        }
 
-                //                update_user_meta($user_id, 'billing_phone', $service_person['Mobile']);
-                update_user_meta($user_id, 'digits_phone_no', $service_person['Mobile']);
-                update_user_meta($user_id, 'digits_phone', $service_person['Mobile']);
-                update_user_meta($user_id, 'digits_phone_no', $service_person['Mobile']);
-            }
-            $metaKeyVals = array(
-                'billing_first_name' => $service_person['FirstName'],
-                'billing_last_name' => $service_person['LastName'],
-                'billing_address_1' => $service_person['Address'],
-                'billing_email' => $service_person['Email']
-            );
-            foreach ($metaKeyVals as $key => $val) {
-                update_user_meta($user_id, $key, $val);
-            }
-            update_person_sync($person_id);
+        // به‌روزرسانی متاهای صورت‌حساب
+        $metaKeyVals = array(
+            'billing_first_name' => $service_person['FirstName'],
+            'billing_last_name'  => $service_person['LastName'],
+            'billing_address_1'  => $service_person['Address'],
+            'billing_email'      => $service_person['Email'],
+        );
+        foreach ($metaKeyVals as $key => $val) {
+            update_user_meta($user_id, $key, $val);
+        }
 
+        // همگام‌سازی داده‌های شخص
+        update_person_sync($person_id);
+
+        // مدیریت نقش‌ها (فقط برای کاربران غیر administrator)
+        if (!$is_administrator) {
             $user = new \WP_User($user_id);
-            if (!empty($current_user_roles))
+            $current_user_roles = $objPerson ? $objPerson->roles : (isset($existing_user) ? $existing_user->roles : array());
+            
+            // اگر کاربر administrator نیست، نقش‌ها را تغییر بده
+            if (!empty($service_person['gName']) && in_array($service_person['gName'], $this->get_all_roles())) {
                 foreach ($current_user_roles as $current_role) {
-                    if ($service_person['gName'] != $current_role) //شرط دوم برای اینکه اگر قرار باشه این رول به کاربر اضاقه بشه بیهوده یکبار حذف نشود
+                    if ($service_person['gName'] != $current_role) {
                         $user->remove_role($current_role);
+                    }
                 }
-            if (!empty($service_person['gName'])) {
                 $user->add_role($service_person['gName']);
             }
-            return array('success' => true, 'message' => '');
-        } catch (\Exception $e) {
-            return array('success' => false, 'message' => $e->getMessage());
         }
+
+        // اطلاع‌رسانی به کاربر جدید
+        if (empty($objPerson) && !isset($existing_user) && !empty($service_person['Email'])) {
+            wp_new_user_notification($user_id, null, 'both');
+        }
+
+        return array('success' => true, 'message' => '');
+    } catch (\Exception $e) {
+        return array('success' => false, 'message' => $e->getMessage());
     }
+}
+
+/**
+ * تابع کمکی برای دریافت تمام نقش‌های معتبر وردپرس.
+ *
+ * @return array لیست نام‌های نقش‌ها.
+ */
+private function get_all_roles() {
+    $roles = wp_roles()->get_names();
+    return array_keys($roles);
+}
     private function get_person_by_mahakID($mahak_id)
     {
         $users = get_users(array(
@@ -2261,11 +2314,14 @@ class BazaraApi
         $datas = $this->convert_user_to_people($user, 0, $personGroup);
 
         $result = $this->set_all_data($token, array('people' => array($datas['people']), 'visitorPeople' => array($datas['visitor'])));
-        $result_array = json_decode($result, true);
-        if (!$result_array['success']) {
+        
+        if(is_string($result)){
+            $result_ids = json_decode($result, true)['data']['Data']['Objects']['People']['Results'];
+        }else{
+            error_log('result is not valid');
             return false;
         }
-        $result_ids = $result_array['data']['Data']['Objects']['People']['Results'];
+        
         update_user_meta($user->ID, 'mahak_id', $result_ids[0]['EntityId']);
         update_user_meta($user->ID, 'role', 'customer');
     }
@@ -2502,18 +2558,21 @@ class BazaraApi
             $total_amount = get_post_meta($order_id, '_order_total', true);
             $wallet = get_post_meta($order_id, '_payment_method', true) == 'wallet';
             $order_shipping_cost = get_post_meta($order_id, '_order_shipping', true);
-        } else {
-            //HPOS
-            $CodPaymentMethod = bazara_payment_method_is_cod(get_order_item_meta_payment_hpos($order_id)->payment_method);
-            $total_amount = get_order_item_meta_payment_hpos($order_id)->total_amount;
-            $wallet = get_order_item_meta_payment_hpos($order_id)->payment_method == 'wallet';
-            $order_shipping_cost = get_order_item_shipping_amount_hpos($order_id)->cost;
-        }
+		} else {
+			//HPOS
+			$payment_meta = get_order_item_meta_payment_hpos($order_id);
+			$shipping_meta = get_order_item_shipping_amount_hpos($order_id);
+			$payment_method_value = (!empty($payment_meta) && isset($payment_meta->payment_method)) ? $payment_meta->payment_method : '';
+			$CodPaymentMethod = bazara_payment_method_is_cod($payment_method_value);
+			$total_amount = (!empty($payment_meta) && isset($payment_meta->total_amount)) ? $payment_meta->total_amount : 0;
+			$wallet = ($payment_method_value === 'wallet');
+			$order_shipping_cost = (!empty($shipping_meta) && isset($shipping_meta->cost)) ? $shipping_meta->cost : 0;
+		}
  
         $completed_date = get_post_meta($order_id, '_paid_date', true);
-        if (empty($completed_date)) {
-            $completed_date = $ps->post_date;
-        }
+		if (empty($completed_date)) {
+			$completed_date = !empty($ps) && isset($ps->post_date) ? $ps->post_date : current_time('mysql');
+		}
 
         $completed_date = normalize_datetime_to_gregorian($completed_date);
         bazara_save_log(date_i18n('Y-m-j'), 'completed date', $completed_date, 'test');
@@ -2565,15 +2624,17 @@ class BazaraApi
         //HPOS
         // if (!$hpos_enable) {
 
-        $State = get_post_meta($order_id, '_shipping_state', true);
-        $country = get_post_meta($order_id, '_shipping_country', true);
+        $State   = $order->get_shipping_state();
+        $country = $order->get_shipping_country();
         $first_name = $order->get_billing_first_name();
-        $last_name = $order->get_billing_last_name();
-        $address1 = $order->get_billing_address_1();
-        $address2 = $order->get_billing_address_2();
-        $postCode = $order->get_billing_postcode();
-        $phone =     $order->get_billing_phone();
-        $cityName = get_post_meta($order_id, '_billing_city', true);
+        $last_name  = $order->get_billing_last_name();
+        $address1   = $order->get_billing_address_1();
+        $address2   = $order->get_billing_address_2();
+        $postCode   = $order->get_billing_postcode();
+        $phone      = $order->get_billing_phone();
+        $cityName    = $order->get_shipping_city();
+
+        $all_states = WC()->countries->get_states( $country );
 
         if ($address1 == '')
             $address = $address2;
@@ -2600,31 +2661,51 @@ class BazaraApi
 
         // }
 
-        if (!bazara_is_rtl($State))
+        if (!bazara_is_rtl($State)){
             $State = WC()->countries->get_states($country)[$State];
+        }
 
-        //$city = get_cities($State, $cityName, 'like');
+        $State = normalize_persian_string($State);
 
-        $shippingAddress = array(
+        $city = get_cities($State, $cityName, 'exact');
 
+        // error_log('$State: ' . $State);
+        // error_log('$cityName: ' . $cityName);
+        // error_log('[BAZARA] $city = ' . print_r($city, true));
+
+		// Derive CityId from $city result
+		$cityId = 0;
+		if (is_array($city) && !empty($city)) {
+			$firstCity = reset($city);
+			if (is_object($firstCity) && isset($firstCity->CityID)) {
+				$cityId = (int) $firstCity->CityID;
+			} elseif (is_array($firstCity) && isset($firstCity['CityID'])) {
+				$cityId = (int) $firstCity['CityID'];
+			}
+		}
+
+		$shippingAddress = array(
             'Title' => BAZARA_PERSON_ADDRESS_TITLE . ' - ' . $first_name . ' ' . $last_name,
             'Address' => $State . ' - ' . $cityName . ' - ' . $address,
             'PostalCode' => $postCode,
             'Tel' => $phone,
             'Mobile' => $user_person['mobile'],
-            'CityId' => 0,
+			'CityId' => $cityId,
             'Latitude' => 0,
             'Longitude' => 0
         );
 
+		// error_log('[BAZARA] $shippingAddress = ' . print_r($shippingAddress, true));
 
         $SoftwareCurrency = $options['selectCurrencySoftware'];
         $PluginCurrency = $options['selectCurrencyPlugin'];
         $serial = 0;
         $serialUsed = false;
 
-        foreach ($order->get_items() as $item_key => $item) {
-            if ($item->get_data()['name'] == "Wallet Topup" && class_exists("bazaraTeraWallet")) {
+		foreach ($order->get_items() as $item_key => $item) {
+			$item_data = is_object($item) && method_exists($item, 'get_data') ? (array)$item->get_data() : array();
+			$item_name = isset($item_data['name']) ? $item_data['name'] : '';
+			if ($item_name == "Wallet Topup" && class_exists("bazaraTeraWallet")) {
                 if ($SoftwareCurrency == 'rial' && $PluginCurrency == 'toman') {
                     $total_amount *= 10;
                 } else if ($SoftwareCurrency == 'toman' && $PluginCurrency == 'rial') {
@@ -2797,174 +2878,189 @@ class BazaraApi
             }
 
             if ($store_priority_toggle && is_array($store_priority_value)) {
+                //var_dump('1');
+            
                 $among = $quantity;
-                if (class_exists("sell_simple_with_date_variants"))
+                
+                // Initialize orderDetails array if class exists (though this condition is redundant due to outer check)
+                if (class_exists("sell_simple_with_date_variants")) {
                     $product_orders['orderDetails'] = array();
-
+                }
+            
                 foreach ($store_priority_value as $store) {
                     $storeAsset = get_product_assets($p_detail_id, $store)[0];
-
+            
                     if (!empty($storeAsset)) {
                         $Store_Id = $store;
+            
+                        // Case 1: Store has enough stock to fulfill the entire quantity
                         if ($storeAsset->Count1 >= $among) {
-                            $product_orders['orderDetails'][] =
-                                array(
-                                    'orderClientId' => $orderClientID,
-                                    'orderDetailClientId' => (int)$orderDetailClientID,
-                                    'itemType' => 1,
-                                    'productDetailId' => (int)$p_detail_id,
-                                    'price' => $unit_price,
-                                    'count1' => ($serialUsed ? 1 : $among),
-                                    'count2' => $count2,
-                                    'storeId' => (int)$Store_Id,
-                                    'discount' =>  $total_row_discount,
-                                    'discountType' =>  0,
-                                    'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
-                                    'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
-                                    'promotionCode' =>  0,
-                                    'description' =>  '',
-                                    'orderCode' =>  0,
-                                    'deleted' => false,
-                                    'gift' =>  0
-                                );
+                            $product_orders['orderDetails'][] = array(
+                                'orderClientId' => $orderClientID,
+                                'orderDetailClientId' => (int)$orderDetailClientID,
+                                'itemType' => 1,
+                                'productDetailId' => (int)$p_detail_id,
+                                'price' => $unit_price,
+                                'count1' => ($serialUsed ? 1 : $among),
+                                'count2' => $count2,
+                                'storeId' => (int)$Store_Id,
+                                'discount' => $total_row_discount,
+                                'discountType' => 0,
+                                'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                                'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                                'promotionCode' => 0,
+                                'description' => '',
+                                'orderCode' => 0,
+                                'deleted' => false,
+                                'gift' => 0
+                            );
                             break;
-                        } else if ($storeAsset->Count1 > 0 && $storeAsset->Count1 < $among) {
-
-                            $product_orders['orderDetails'][] =
-                                array(
-                                    'orderClientId' => $orderClientID,
-                                    'orderDetailClientId' => (int)$orderDetailClientID,
-                                    'itemType' => 1,
-                                    'productDetailId' => (int)$p_detail_id,
-                                    'price' => $unit_price,
-                                    'count1' => $storeAsset->Count1,
-                                    'count2' =>  0,
-                                    'storeId' => (int)$Store_Id,
-                                    'discount' =>  $total_row_discount,
-                                    'discountType' =>  0,
-                                    'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
-                                    'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
-                                    'promotionCode' =>  0,
-                                    'description' =>  '',
-                                    'orderCode' =>  0,
-                                    'deleted' => false,
-                                    'gift' =>  0
-                                );
+                        } 
+                        // Case 2: Store has some stock but less than required
+                        elseif ($storeAsset->Count1 > 0 && $storeAsset->Count1 < $among) {
+                            $product_orders['orderDetails'][] = array(
+                                'orderClientId' => $orderClientID,
+                                'orderDetailClientId' => (int)$orderDetailClientID,
+                                'itemType' => 1,
+                                'productDetailId' => (int)$p_detail_id,
+                                'price' => $unit_price,
+                                'count1' => $storeAsset->Count1,
+                                'count2' => 0,
+                                'storeId' => (int)$Store_Id,
+                                'discount' => $total_row_discount,
+                                'discountType' => 0,
+                                'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                                'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                                'promotionCode' => 0,
+                                'description' => '',
+                                'orderCode' => 0,
+                                'deleted' => false,
+                                'gift' => 0
+                            );
                             $among -= $storeAsset->Count1;
                             continue;
-                        } else if ($storeAsset->Count1 == 0) continue;
+                        } 
+                        // Case 3: Store has no stock
+                        elseif ($storeAsset->Count1 == 0) {
+                            continue;
+                        }
                     }
                 }
-            } else if (!class_exists("sell_simple_with_date_variants")) {
-                $Store_Id  =  $this->visitor_options['StoreID'];
-                $product_orders['orderDetails'][] =
-                    array(
+            } elseif (!class_exists("sell_simple_with_date_variants")) {
+                //var_dump('2');
+            
+                $Store_Id = $this->visitor_options['StoreID'];
+                $product_orders['orderDetails'][] = array(
+                    'orderClientId' => $orderClientID,
+                    'orderDetailClientId' => (int)$orderDetailClientID,
+                    'itemType' => 1,
+                    'productDetailId' => (int)$p_detail_id,
+                    'price' => $unit_price,
+                    'count1' => ($serialUsed ? 1 : $quantity),
+                    'count2' => $count2,
+                    'storeId' => (int)$Store_Id,
+                    'discount' => $total_row_discount,
+                    'discountType' => 0,
+                    'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                    'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                    'promotionCode' => 0,
+                    'description' => '',
+                    'orderCode' => 0,
+                    'deleted' => false,
+                    'gift' => 0
+                );
+            }
+            
+            // Handle product serials
+            if (!empty($getProductSerials) && !class_exists("sell_simple_with_date_variants") && is_array($getProductSerials) && ($quantity - 1) > 0) {
+                //var_dump('3');
+            
+                $changedQuantity = ($quantity - 1);
+                for ($i = 0; $i < $changedQuantity; $i++) {
+                    bazara_update_client_id('order_detail', $orderDetailClientID);
+                    $orderDetailClientID = bazara_get_last_client_id('order_detail') + 1;
+                    $p_detail_id = $getProductSerials[$i + 1]['detail_id'];
+                    
+                    $product_orders['orderDetails'][] = array(
                         'orderClientId' => $orderClientID,
                         'orderDetailClientId' => (int)$orderDetailClientID,
                         'itemType' => 1,
                         'productDetailId' => (int)$p_detail_id,
                         'price' => $unit_price,
-                        'count1' => ($serialUsed ? 1 : $quantity),
-                        'count2' => $count2,
+                        'count1' => 1,
+                        'count2' => 0,
                         'storeId' => (int)$Store_Id,
-                        'discount' =>  $total_row_discount,
-                        'discountType' =>  0,
+                        'discount' => $total_row_discount,
+                        'discountType' => 0,
                         'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
                         'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
-                        'promotionCode' =>  0,
-                        'description' =>  '',
-                        'orderCode' =>  0,
+                        'promotionCode' => 0,
+                        'description' => '',
+                        'orderCode' => 0,
                         'deleted' => false,
-                        'gift' =>  0
+                        'gift' => 0
                     );
-            }
-
-
-            if (!empty($getProductSerials) && (!class_exists("sell_simple_with_date_variants")) && is_array($getProductSerials) && ($quantity - 1) > 0) {
-
-                $changedQuantity = ($quantity - 1);
-                for ($i = 0; $i < $changedQuantity; $i++) {
-
-                    bazara_update_client_id('order_detail', $orderDetailClientID);
-                    $orderDetailClientID = bazara_get_last_client_id('order_detail') + 1;
-                    $p_detail_id = $getProductSerials[$i + 1]['detail_id'];
-                    $product_orders['orderDetails'][] =
-                        array(
-                            'orderClientId' => $orderClientID,
-                            'orderDetailClientId' => (int)$orderDetailClientID,
-                            'itemType' => 1,
-                            'productDetailId' => (int)$p_detail_id,
-                            'price' => $unit_price,
-                            'count1' => 1,
-                            'count2' => 0,
-                            'storeId' => (int)$Store_Id,
-                            'discount' =>  $total_row_discount,
-                            'discountType' =>  0,
-                            'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
-                            'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
-                            'promotionCode' =>  0,
-                            'description' =>  '',
-                            'orderCode' =>  0,
-                            'deleted' => false,
-                            'gift' =>  0
-                        );
                 }
-            } else
+            } else {
+                //var_dump('4');
                 bazara_update_client_id('order_detail', $orderDetailClientID);
-
+            }
+            
+            // Handle case with sell_simple_with_date_variants and product serials
             if (class_exists("sell_simple_with_date_variants") && is_array($getProductSerials)) {
-
+                //var_dump('5');
+            
                 $among = $quantity;
-                $Store_Id  =  $this->visitor_options['StoreID'];
-
+                $Store_Id = $this->visitor_options['StoreID'];
+            
                 foreach ($getProductSerials as $pdt) {
                     $storeAsset = get_product_assets($pdt['detail_id'], $Store_Id)[0];
-
+            
                     if (!empty($storeAsset)) {
+                        // Case 1: Store has enough stock
                         if ($storeAsset->Count1 >= $among) {
-                            $product_orders['orderDetails'][] =
-                                array(
-                                    'orderClientId' => $orderClientID,
-                                    'orderDetailClientId' => (int)$orderDetailClientID,
-                                    'itemType' => 1,
-                                    'productDetailId' => (int)$pdt['detail_id'],
-                                    'price' => $unit_price,
-                                    'count1' => $among,
-                                    'count2' => $count2,
-                                    'storeId' => (int)$Store_Id,
-                                    'discount' =>  $total_row_discount,
-                                    'discountType' =>  0,
-                                    'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
-                                    'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
-                                    'promotionCode' =>  0,
-                                    'description' =>  '',
-                                    'orderCode' =>  0,
-                                    'deleted' => false,
-                                    'gift' =>  0
-                                );
+                            $product_orders['orderDetails'][] = array(
+                                'orderClientId' => $orderClientID,
+                                'orderDetailClientId' => (int)$orderDetailClientID,
+                                'itemType' => 1,
+                                'productDetailId' => (int)$pdt['detail_id'],
+                                'price' => $unit_price,
+                                'count1' => $among,
+                                'count2' => $count2,
+                                'storeId' => (int)$Store_Id,
+                                'discount' => $total_row_discount,
+                                'discountType' => 0,
+                                'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                                'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                                'promotionCode' => 0,
+                                'description' => '',
+                                'orderCode' => 0,
+                                'deleted' => false,
+                                'gift' => 0
+                            );
                             break;
-                        } else if ($storeAsset->Count1 > 0 && $storeAsset->Count1 < $among) {
-
-                            $product_orders['orderDetails'][] =
-                                array(
-                                    'orderClientId' => $orderClientID,
-                                    'orderDetailClientId' => (int)$orderDetailClientID,
-                                    'itemType' => 1,
-                                    'productDetailId' => (int)$pdt['detail_id'],
-                                    'price' => $unit_price,
-                                    'count1' => $storeAsset->Count1,
-                                    'count2' =>  0,
-                                    'storeId' => (int)$Store_Id,
-                                    'discount' =>  $total_row_discount,
-                                    'discountType' =>  0,
-                                    'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
-                                    'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
-                                    'promotionCode' =>  0,
-                                    'description' =>  '',
-                                    'orderCode' =>  0,
-                                    'deleted' => false,
-                                    'gift' =>  0
-                                );
+                        } 
+                        // Case 2: Store has some stock but less than required
+                        elseif ($storeAsset->Count1 > 0 && $storeAsset->Count1 < $among) {
+                            $product_orders['orderDetails'][] = array(
+                                'orderClientId' => $orderClientID,
+                                'orderDetailClientId' => (int)$orderDetailClientID,
+                                'itemType' => 1,
+                                'productDetailId' => (int)$pdt['detail_id'],
+                                'price' => $unit_price,
+                                'count1' => $storeAsset->Count1,
+                                'count2' => 0,
+                                'storeId' => (int)$Store_Id,
+                                'discount' => $total_row_discount,
+                                'discountType' => 0,
+                                'taxPercent' => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                                'chargePercent' => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                                'promotionCode' => 0,
+                                'description' => '',
+                                'orderCode' => 0,
+                                'deleted' => false,
+                                'gift' => 0
+                            );
                             $among -= $storeAsset->Count1;
                             continue;
                         }
@@ -2972,6 +3068,13 @@ class BazaraApi
                 }
             }
         }
+
+        // echo "<pre>";
+		// var_dump($product_orders['orderDetails']);
+		// var_dump($order->get_items());
+		// var_dump(count($order->get_items()));
+		// var_dump(count($product_orders['orderDetails']));
+		// die;
 
         if (empty($product_orders['orderDetails'])) {
             echo 'سفارش دارای اقلام نمی باشد. احتمالا محصولات از سایت حذف شده اند.';
@@ -2981,6 +3084,41 @@ class BazaraApi
         if (count($product_orders['orderDetails']) <> count($order->get_items())) {
             echo 'تعداد اقلام سفارش بیشتر از موجودی می باشد';
             return array('success' => false, 'message' => 'تعداد اقلام سفارش بیشتر از موجودی می باشد');
+        }
+
+        $order_items_quantities = array();
+        foreach ($order->get_items() as $item_key => $item) {
+            $db_item = get_order_item_meta($item_key);
+            if (empty($db_item)) continue;
+
+            $product_id = $db_item->variantID > 0 ? $db_item->variantID : $db_item->productID;
+            $measurment = $item->get_meta('_measurement_data');
+            $quantity = !empty($measurment) ? $measurment['weight']['value'] * ((int)$db_item->Qty) : ((int)$db_item->Qty);
+
+            if (!isset($order_items_quantities[$product_id])) {
+                $order_items_quantities[$product_id] = 0;
+            }
+            $order_items_quantities[$product_id] += $quantity;
+        }
+
+        $order_details_quantities = array();
+        foreach ($product_orders['orderDetails'] as $order_detail) {
+            $product_detail_id = $order_detail['productDetailId'];
+            if (!isset($order_details_quantities[$product_detail_id])) {
+                $order_details_quantities[$product_detail_id] = 0;
+            }
+            $order_details_quantities[$product_detail_id] += $order_detail['count1'];
+        }
+        
+        // بررسی تطابق تعدادها
+        foreach ($order_items_quantities as $product_id => $original_quantity) {
+            $product_detail_id = get_post_meta($product_id, 'mahak_product_detail_id', true);
+            if (isset($order_details_quantities[$product_detail_id])) {
+                if ($order_details_quantities[$product_detail_id] != $original_quantity) {
+                    echo 'تعداد خریداری شده محصول با تعداد ثبت شده در سیستم مغایرت دارد';
+                    return array('success' => false, 'message' => 'تعداد خریداری شده محصول با تعداد ثبت شده در سیستم مغایرت دارد');
+                }
+            }
         }
 
         if ($SoftwareCurrency == 'rial' && $PluginCurrency == 'toman') {
@@ -3151,13 +3289,15 @@ class BazaraApi
             $metaMethod = get_order_item_meta_payment_hpos($orderid)->payment_method;
         }
 
-        $banks = json_decode(stripslashes($options['banksMethods']), true);
+		$banks = json_decode(stripslashes(isset($options['banksMethods']) ? $options['banksMethods'] : ''), true);
         if (empty($banks))
             return false;
         foreach ($banks as $bank) {
 
-            if (in_array($bank['method'], [$payment_method, $metaMethod]))
-                return $bank['name'];
+			$bank_method = isset($bank['method']) ? $bank['method'] : null;
+			$bank_name = isset($bank['name']) ? $bank['name'] : null;
+			if ($bank_method !== null && in_array($bank_method, [$payment_method, $metaMethod]))
+				return $bank_name;
         }
         return false;
     }
@@ -3221,7 +3361,7 @@ class BazaraApi
     private function get_selected_shipping_person_id($shipping_method)
     {
         $options = $this->visitor_settings;
-        $shippings = json_decode(stripslashes($options['carrierMethods']), true);
+		$shippings = json_decode(stripslashes(isset($options['carrierMethods']) ? $options['carrierMethods'] : ''), true);
 
         if (empty($shippings)) {
             return null;
@@ -3231,10 +3371,12 @@ class BazaraApi
             $shipping_method = explode(":", $shipping_method)[0];
         }
 
-        foreach ($shippings as $shipping) {
-            if ($shipping['method'] == $shipping_method) {
-                return $shipping['name'];
-            }
+		foreach ($shippings as $shipping) {
+			$shipping_method_key = isset($shipping['method']) ? $shipping['method'] : null;
+			$shipping_name = isset($shipping['name']) ? $shipping['name'] : null;
+			if ($shipping_method_key !== null && $shipping_method_key == $shipping_method) {
+				return $shipping_name;
+			}
         }
 
         return null;
