@@ -4,7 +4,19 @@ Contributors: Erfan Nazari
 Author URI: https://www.mahaksoft.com/  
 Plugin URI: https://www.mahaksoft.com/bazara/  
 
-## [3.1042]
+## [3.1044]
+
+### Added
+- پرش از روی محصولاتی که مقدار ویژگی‌ آن ها NULL است!
+- نمایش علت سینک نشدن یک کالا در زمان سینک دستی
+
+### Changed
+- تغییر اسم تابع get_product_attributes() به get_product_attributes_plugin() به جهت رفع تداخل تکراری بودن نام تابع بین بازارا و قالب تکنو شاپ
+
+### Fixed
+- رفع خطا های مربوط به Cannot declare تقویم جلالی
+
+## [3.1043]
 
 ## Added
 - پرش از محصولات دارای مشکل بهینه شد  
