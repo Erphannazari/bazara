@@ -1009,7 +1009,7 @@ function bazara_save_visitor_setting()
     $options['site_name'] = $validToken['object']['UserTitle'];
     $options['DatabaseId'] = $validToken['object']['DatabaseId'];
     $options['PackageNo'] = $validToken['object']['PackageNo'];
-    $options['CreditDay'] = $validToken['object']['CreditDay'];
+    $options['CreditDay'] = isset($validToken['object']['CreditDay']) ? (int)$validToken['object']['CreditDay'] : 0;
     update_option('bazara_options', $options);
 
     $savedVisitor = $validToken['VisitorID'];
@@ -1350,19 +1350,46 @@ function create_product($args)
 
             //Attribute has null or empty options (Customization)
             $attributes = wc_prepare_product_attributes($args['attributes'], $product->get_id());
-            foreach ($attributes as $key => $attribute) {
-                $options = $attribute->get_options();
-                if (empty($options)) {
-                    return array(
-                        'success' => false,
-                        'message' => "ویژگی '{$attribute->get_name()}' مقدار options ندارد و امکان همگام‌سازی وجود ندارد."
-                    );
+
+            // --- FIX attributes: ensure options is always an array --- //
+            if ( ! empty( $attributes ) ) {
+                foreach ( $attributes as $key => $attribute ) {
+
+                    // فقط روی WC_Product_Attribute کار کنیم
+                    if ( $attribute instanceof WC_Product_Attribute ) {
+
+                        // گرفتن options فعلی
+                        $options = $attribute->get_options();
+
+                        // اگر null یا رشته بود → تبدیل به آرایه
+                        if ( empty( $options ) ) {
+                            $attribute->set_options( [] ); // آرایه خالی بدون مشکل ذخیره می‌شود
+                        }
+                        elseif ( is_string( $options ) ) {
+                            // اگر به اشتباه به صورت رشته آمده مثل "قرمز,آبی"
+                            $attribute->set_options( array_map( 'trim', explode( ',', $options ) ) );
+                        }
+                        elseif ( ! is_array( $options ) ) {
+                            // هر نوع اشتباه دیگر → تبدیل امنی انجام می‌دهیم
+                            $attribute->set_options( [ strval( $options ) ] );
+                        }
+                    }
                 }
             }
 
+            // foreach ($attributes as $key => $attribute) {
+            //     $options = $attribute->get_options();
+            //     if (empty($options)) {
+            //         return array(
+            //             'success' => false,
+            //             'message' => "ویژگی '{$attribute->get_name()}' مقدار options ندارد و امکان همگام‌سازی وجود ندارد."
+            //         );
+            //     }
+            // }
+
             // Attributes et default attributes
             if (isset($args['attributes'])  && !empty($args['vars']))
-                $product->set_attributes(wc_prepare_product_attributes($args['attributes'], $product->get_id()));
+                $product->set_attributes($attributes);
             if (isset($args['default_attributes']))
                 $product->set_default_attributes($args['default_attributes']); // Needs a special formatting
 
@@ -1441,6 +1468,11 @@ function create_product($args)
             delete_product_wcrb_transient($product_id);
             
             if ($args['qty'] <= 0 || $is_variable) {
+            if (class_exists('bazara_manage_quantity') && $args['qty'] <= 0) {
+            $product->set_stock_quantity(0);
+            $product->set_manage_stock(true);
+            $product->set_stock_status('instock');
+            } else {
             // Check if product is variable and has any instock variations
             $all_variations_outofstock = true;
             
@@ -1457,6 +1489,7 @@ function create_product($args)
             // If simple product with qty <= 0 or all variations are out of stock, mark as outofstock
             if ((!$is_variable && $args['qty'] <= 0) || ($is_variable && $all_variations_outofstock)) {
             product_out_of_Stock($product->get_id());
+            }
             }
             }
             } else
@@ -1888,9 +1921,16 @@ function create_variations($product_id, $args, $final_price, $wholeSalePrice, $c
         $args['manage_stock'] = $args['qty'] > 0;
         
         $qty = $args['qty'];
-        if ($qty <= 0) {
-        $variation->set_manage_stock(false);
-        product_out_of_Stock($variation->get_id());
+        if ($qty <= 0)
+        {
+            if (class_exists("bazara_manage_quantity")){
+                $variation->set_stock_quantity(0);
+                $variation->set_manage_stock(true);
+                $variation->set_stock_status('instock');
+            }else{
+                $variation->set_manage_stock(false);
+                product_out_of_Stock($variation->get_id());
+            }
         } else {
         $variation->set_stock_quantity($args['qty']);
         $variation->set_manage_stock(true);
@@ -2181,19 +2221,490 @@ function get_product_by_mahakID($mahak_product_id)
 }
 function get_product_variation($variation_id, $detailID)
 {
-    $posts = get_posts(array(
-        'posts_per_page'   => -1,
-        'post_type'        => 'product_variation',
-        'meta_query' => array(
-            'relation' => 'and',
-            array('key' => 'mahak_product_detail_id', 'value' => $detailID, 'compare' => '=='),
-        ),
-        'post_status' => 'any',
-    ));
-    $product = null;
-    if (!empty($posts))
-        $product = wc_get_product($posts[0]->ID);
+    global $wpdb;
+    
+    // Validate input
+    if (empty($detailID)) {
+        return null;
+    }
+    
+    // Prepare the detailID for SQL query
+    $detailID = absint($detailID);
+    
+    // Direct $wpdb query for better performance
+    // Join posts table with postmeta to find variations with matching mahak_product_detail_id
+    if (!empty($variation_id)) {
+        // Use JOIN for better performance when variation_id is provided
+        $variation_id = absint($variation_id);
+        $query = $wpdb->prepare(
+            "SELECT DISTINCT p.ID, p.post_parent, p.post_date
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm1 ON p.ID = pm1.post_id
+             INNER JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id
+             WHERE p.post_type = 'product_variation'
+             AND pm1.meta_key = 'mahak_product_detail_id'
+             AND pm1.meta_value = %s
+             AND pm2.meta_key = 'prop_id'
+             AND pm2.meta_value = %s
+             AND p.post_status != 'trash'
+             ORDER BY p.post_date DESC",
+            $detailID,
+            $variation_id
+        );
+    } else {
+        // Simpler query when only detailID is provided
+        $query = $wpdb->prepare(
+            "SELECT p.ID, p.post_parent, p.post_date
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+             WHERE p.post_type = 'product_variation'
+             AND pm.meta_key = 'mahak_product_detail_id'
+             AND pm.meta_value = %s
+             AND p.post_status != 'trash'
+             ORDER BY p.post_date DESC",
+            $detailID
+        );
+    }
+    
+    $results = $wpdb->get_results($query);
+    
+    // Handle no results
+    if (empty($results)) {
+        return null;
+    }
+    
+    // Handle duplicates: check for images and keep the best one
+    if (count($results) > 1) {
+        $variations_with_images = array();
+        $variations_without_images = array();
+        
+        // Check each variation for images
+        foreach ($results as $row) {
+            $variation_obj = wc_get_product($row->ID);
+            
+            if (!$variation_obj || !$variation_obj->is_type('variation')) {
+                continue;
+            }
+            
+            // Check if variation has an image
+            $image_id = $variation_obj->get_image_id();
+            $has_image = !empty($image_id) && wp_attachment_is_image($image_id);
+            
+            if ($has_image) {
+                $variations_with_images[] = array(
+                    'ID' => $row->ID,
+                    'post_date' => $row->post_date,
+                    'product' => $variation_obj
+                );
+            } else {
+                $variations_without_images[] = array(
+                    'ID' => $row->ID,
+                    'post_date' => $row->post_date,
+                    'product' => $variation_obj
+                );
+            }
+        }
+        
+        // Determine which variation to keep
+        $keep_variation = null;
+        $duplicate_ids_to_delete = array();
+        
+        // Safety check: if no valid variations found, return null
+        if (empty($variations_with_images) && empty($variations_without_images)) {
+            error_log(sprintf(
+                'Bazara: No valid variations found for detailID %d. All variations failed validation.',
+                $detailID
+            ));
+            return null;
+        }
+        
+        if (!empty($variations_with_images)) {
+            // Keep the first variation with image (already sorted by date DESC, so newest first)
+            $keep_variation = $variations_with_images[0];
+            // Collect all other IDs for deletion (including other variations with images)
+            foreach ($variations_with_images as $idx => $var) {
+                if ($idx > 0) {
+                    $duplicate_ids_to_delete[] = $var['ID'];
+                }
+            }
+            // Also delete all variations without images
+            foreach ($variations_without_images as $var) {
+                $duplicate_ids_to_delete[] = $var['ID'];
+            }
+        } else {
+            // No images found, keep the newest one (first in results, already sorted DESC)
+            if (!empty($variations_without_images)) {
+                $keep_variation = $variations_without_images[0];
+                // Delete all others
+                foreach ($variations_without_images as $idx => $var) {
+                    if ($idx > 0) {
+                        $duplicate_ids_to_delete[] = $var['ID'];
+                    }
+                }
+            } else {
+                // Fallback: should not happen, but keep the first result
+                $keep_variation = array(
+                    'ID' => $results[0]->ID,
+                    'post_date' => $results[0]->post_date,
+                    'product' => wc_get_product($results[0]->ID)
+                );
+                foreach ($results as $idx => $row) {
+                    if ($idx > 0) {
+                        $duplicate_ids_to_delete[] = $row->ID;
+                    }
+                }
+            }
+        }
+        
+        // Log the duplicate detection and cleanup
+        $all_duplicate_ids = array_map(function($row) {
+            return $row->ID;
+        }, $results);
+        
+        error_log(sprintf(
+            'Bazara: Duplicate product variations detected for detailID %d. Found %d variations with IDs: %s. Keeping ID: %d. Deleting IDs: %s',
+            $detailID,
+            count($results),
+            implode(', ', $all_duplicate_ids),
+            $keep_variation['ID'],
+            implode(', ', $duplicate_ids_to_delete)
+        ));
+        
+        // Delete duplicate variations
+        foreach ($duplicate_ids_to_delete as $duplicate_id) {
+            $duplicate_product = wc_get_product($duplicate_id);
+            if ($duplicate_product) {
+                // Use force delete to permanently remove
+                $duplicate_product->delete(true);
+                clean_post_cache($duplicate_id);
+                error_log(sprintf(
+                    'Bazara: Deleted duplicate variation ID %d for detailID %d',
+                    $duplicate_id,
+                    $detailID
+                ));
+            }
+        }
+        
+        // Use the kept variation
+        $variation_post_id = $keep_variation['ID'];
+        $product = $keep_variation['product'];
+    } else {
+        // Single result, no duplicates
+        $variation_post_id = $results[0]->ID;
+        $product = null; // Will be loaded below
+    }
+    
+    // Clear cache to avoid stale results
+    clean_post_cache($variation_post_id);
+    
+    // Also clear WooCommerce product cache
+    wc_delete_product_transients($variation_post_id);
+    
+    // Get the product object if not already loaded (in duplicate case, it's already loaded)
+    if (!isset($product) || is_null($product)) {
+        $product = wc_get_product($variation_post_id);
+    }
+    
+    // Additional safety check: verify the product is valid and is a variation
+    if (!$product || !$product->is_type('variation')) {
+        error_log(sprintf(
+            'Bazara: Invalid variation product returned for detailID %d. Post ID: %d',
+            $detailID,
+            $variation_post_id
+        ));
+        return null;
+    }
+    
     return $product;
+}
+/**
+ * Cleanup helper: Remove WooCommerce variations for product details marked as deleted in ERP table.
+ *
+ * Behavior:
+ * - Reads ProductDetailId values from {$wpdb->prefix}bazara_product_details where Deleted = 1.
+ * - For each ProductDetailId, finds all product_variation posts that have meta 'mahak_product_detail_id' equal to it.
+ * - Force-deletes those variations and clears caches.
+ *
+ * @param int $limit Maximum number of ProductDetailId records to process per call.
+ * @return array Summary with processed count and deleted IDs for observability.
+ */
+function bz_cleanup_variations_marked_deleted($limit = 200)
+{
+	global $wpdb;
+
+	$limit = absint($limit);
+	if ($limit <= 0) {
+		$limit = 200;
+	}
+
+	$table = $wpdb->prefix . 'bazara_product_details';
+
+	// Fetch distinct ProductDetailId where marked deleted
+	$productDetailIds = $wpdb->get_col(
+		$wpdb->prepare(
+			"SELECT DISTINCT ProductDetailId
+			 FROM {$table}
+			 WHERE Deleted = %d
+			 LIMIT %d",
+			1,
+			$limit
+		)
+	);
+
+	if (empty($productDetailIds)) {
+		return array(
+			'processed' => 0,
+			'deleted_variations' => array(),
+			'message' => 'No deleted ProductDetailId records found.'
+		);
+	}
+
+	$deletedVariationIds = array();
+
+	// Prepare and reuse the SQL to find variations by ProductDetailId
+	foreach ($productDetailIds as $detailId) {
+		$detailId = absint($detailId);
+		if ($detailId <= 0) {
+			continue;
+		}
+
+		$variationIds = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT p.ID
+				 FROM {$wpdb->posts} p
+				 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+				 WHERE p.post_type = 'product_variation'
+				   AND p.post_status != 'trash'
+				   AND pm.meta_key = 'mahak_product_detail_id'
+				   AND pm.meta_value = %s",
+				$detailId
+			)
+		);
+
+		if (empty($variationIds)) {
+			continue;
+		}
+
+		error_log(sprintf(
+			'Bazara: Deleting %d duplicate/obsolete variations for deleted ProductDetailId %d. Variation IDs: %s',
+			count($variationIds),
+			$detailId,
+			implode(', ', $variationIds)
+		));
+
+		foreach ($variationIds as $varId) {
+			$varId = absint($varId);
+			if ($varId <= 0) {
+				continue;
+			}
+
+			$variation = wc_get_product($varId);
+			if ($variation && $variation->is_type('variation')) {
+				$variation->delete(true); // force delete
+				clean_post_cache($varId);
+				wc_delete_product_transients($varId);
+				$deletedVariationIds[] = $varId;
+				error_log(sprintf('Bazara: Variation ID %d deleted for ProductDetailId %d', $varId, $detailId));
+			}
+		}
+	}
+
+	return array(
+		'processed' => count($productDetailIds),
+		'deleted_variations' => $deletedVariationIds,
+		'message' => 'Cleanup complete.'
+	);
+}
+
+/**
+ * Helper to remove duplicate WooCommerce variations detected by the duplicate-variation report.
+ *
+ * @param int $limit Maximum duplicate groups to process per execution.
+ * @return array Summary with processed groups and deleted variation IDs.
+ */
+function bz_cleanup_duplicate_variations_from_report( $limit = 100 ) {
+    global $wpdb;
+
+    $limit = absint( $limit );
+    if ( $limit <= 0 ) {
+        $limit = 100;
+    }
+
+    // پیدا کردن گروه‌های تکراری
+    $sql = $wpdb->prepare(
+        "SELECT parent_id, mahak_product_detail_id, cnt, variation_ids
+         FROM (
+             SELECT
+                 p.post_parent AS parent_id,
+                 pm.meta_value AS mahak_product_detail_id,
+                 COUNT(*) AS cnt,
+                 GROUP_CONCAT(p.ID ORDER BY p.post_date DESC) AS variation_ids
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = 'mahak_product_detail_id'
+             WHERE p.post_type = 'product_variation' AND p.post_status != 'trash'
+             GROUP BY p.post_parent, pm.meta_value
+             HAVING cnt > 1
+         ) duplicates
+         LIMIT %d",
+        $limit
+    );
+
+    $duplicateGroups = $wpdb->get_results( $sql );
+
+    if ( empty( $duplicateGroups ) ) {
+        return [
+            'processed_groups'   => 0,
+            'deleted_variations' => [],
+            'message'            => 'هیچ گروه وریشن تکراری پیدا نشد.'
+        ];
+    }
+
+    $deletedVariationIds = [];
+    $processedGroups     = 0;
+
+    foreach ( $duplicateGroups as $group ) {
+        $processedGroups++;
+
+        // تبدیل variation_ids به آرایه عددی سالم
+        $variationIds = array_filter(
+            array_unique( array_map( 'absint', explode( ',', $group->variation_ids ) ) ),
+            function( $id ) use ( $wpdb ) {
+                if ( $id <= 0 ) {
+                    return false;
+                }
+                // چک مستقیم از دیتابیس
+                $exists = $wpdb->get_var( $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE ID = %d AND post_type = 'product_variation' AND post_status != 'trash'",
+                    $id
+                ) );
+                return $exists;
+            }
+        );
+
+        if ( empty( $variationIds ) ) {
+            error_log( "بازارا: هیچ وریشن معتبری در گروه ProductDetailId: {$group->mahak_product_detail_id} (parent {$group->parent_id}) پیدا نشد." );
+            continue;
+        }
+
+        $variations = [];
+
+        foreach ( $variationIds as $vid ) {
+            // مستقیم از دیتابیس چک می‌کنیم
+            $post = $wpdb->get_row( $wpdb->prepare(
+                "SELECT ID, post_date FROM {$wpdb->posts} WHERE ID = %d AND post_type = 'product_variation' AND post_status != 'trash'",
+                $vid
+            ) );
+            if ( ! $post ) {
+                continue;
+            }
+
+            // گرفتن تصویر از متادیتا
+            $imageId = $wpdb->get_var( $wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_thumbnail_id'",
+                $vid
+            ) );
+            $hasImage = ! empty( $imageId ) && wp_attachment_is_image( $imageId );
+            $timestamp = $post->post_date ? strtotime( $post->post_date ) : 0;
+
+            $variations[] = [
+                'ID'         => $vid,
+                'has_image'  => $hasImage,
+                'post_date'  => $timestamp,
+            ];
+        }
+
+        if ( empty( $variations ) ) {
+            error_log( "بازارا: گروه تکراری رد شد (هیچ وریشن معتبری نداشت) - ProductDetailId: {$group->mahak_product_detail_id} (parent {$group->parent_id})" );
+            continue;
+        }
+
+        // جدا کردن وریشن‌ها
+        $withImage    = array_filter( $variations, fn($v) => $v['has_image'] );
+        $withoutImage = array_filter( $variations, fn($v) => ! $v['has_image'] );
+
+        // انتخاب وریشن برای نگه داشتن
+        if ( ! empty( $withImage ) ) {
+            usort( $withImage, fn($a, $b) => $b['post_date'] <=> $a['post_date'] );
+            $keep = $withImage[0];
+        } elseif ( ! empty( $withoutImage ) ) {
+            usort( $withoutImage, fn($a, $b) => $b['post_date'] <=> $a['post_date'] );
+            $keep = $withoutImage[0];
+        } else {
+            continue;
+        }
+
+        $idsToDelete = [];
+        foreach ( $variations as $var ) {
+            if ( $var['ID'] === $keep['ID'] ) {
+                continue;
+            }
+            if ( $keep['has_image'] ) {
+                if ( ! $var['has_image'] || $var['post_date'] < $keep['post_date'] ) {
+                    $idsToDelete[] = $var['ID'];
+                }
+            } else {
+                $idsToDelete[] = $var['ID'];
+            }
+        }
+
+        if ( ! empty( $idsToDelete ) ) {
+            error_log( "بازارا: پاکسازی تکراری‌ها - ProductDetailId: {$group->mahak_product_detail_id} (parent {$group->parent_id}) | نگه‌داشته شده: {$keep['ID']} | حذف: " . implode( ', ', $idsToDelete ) );
+        }
+
+        // حذف کاملاً خام و امن با وردپرس
+        foreach ( $idsToDelete as $deleteId ) {
+            $deleteId = absint( $deleteId );
+            if ( $deleteId <= 0 ) {
+                continue;
+            }
+
+            // چک نهایی وجود پست
+            $post_exists = $wpdb->get_var( $wpdb->prepare(
+                "SELECT ID FROM {$wpdb->posts} WHERE ID = %d AND post_type = 'product_variation' AND post_status != 'trash'",
+                $deleteId
+            ) );
+            if ( ! $post_exists ) {
+                error_log( "بازارا: پست $deleteId وجود ندارد یا قبلاً حذف شده." );
+                continue;
+            }
+
+            // حذف متادیتاها
+            $wpdb->query( $wpdb->prepare(
+                "DELETE FROM {$wpdb->postmeta} WHERE post_id = %d",
+                $deleteId
+            ) );
+
+            // حذف پست
+            $deleted = $wpdb->query( $wpdb->prepare(
+                "DELETE FROM {$wpdb->posts} WHERE ID = %d AND post_type = 'product_variation'",
+                $deleteId
+            ) );
+
+            if ( $deleted ) {
+                $deletedVariationIds[] = $deleteId;
+                // پاک کردن کش
+                clean_post_cache( $deleteId );
+                wp_cache_delete( $deleteId, 'posts' );
+                wp_cache_delete( $deleteId, 'post_meta' );
+                wc_delete_product_transients( $deleteId );
+            } else {
+                error_log( "بازارا: حذف پست $deleteId ناموفق بود - احتمالاً مشکل دیتابیس یا مجوزها." );
+            }
+        }
+
+        // پاک کردن کش والد
+        if ( ! empty( $group->parent_id ) ) {
+            clean_post_cache( $group->parent_id );
+            wp_cache_delete( $group->parent_id, 'posts' );
+            wc_delete_product_transients( $group->parent_id );
+        }
+    }
+
+    return [
+        'processed_groups'   => $processedGroups,
+        'deleted_variations' => $deletedVariationIds,
+        'message'            => 'پاکسازی وریشن‌های تکراری با موفقیت انجام شد.'
+    ];
 }
 // Utility function that prepare product attributes before saving
 function wc_prepare_product_attributes($attributes, $pid)
@@ -2416,7 +2927,7 @@ function bazara_run_product_synchronize()
 {
     $bazara_options = bazara_get_options();
 
-    if ($bazara_options['CreditDay'] < 0) {
+    if (isset($bazara_options['CreditDay']) && $bazara_options['CreditDay'] < 0) {
         bazara_save_log(date_i18n('Y-m-j'), 'اتمام اعتبار', 'expired', 'error');
         return false;
     }
@@ -2455,6 +2966,8 @@ function bazara_run_product_synchronize()
         for ($i = 0; $i < count($entities); $i++) {
             $bazara->bazara_copy_entities($entities[$i], 0, 100000);
         }
+
+        bz_cleanup_duplicate_variations_from_report(10);
 
         if (get_product_cnt() > 0) {
             if ($syncCategory)
@@ -2544,7 +3057,12 @@ function get_last_order_id()
     return reset($results);
 }
 function get_order_item_meta_payment_hpos($orderid)
-{ //zamanian 1403/05/22 add 
+{
+    $hpos_enable = get_option('woocommerce_custom_orders_table_enabled') === 'yes';
+    if(!$hpos_enable){
+        return null;
+    }
+
     global $wpdb;
 
     $table_order_item = "{$wpdb->prefix}wc_orders";
@@ -2566,10 +3084,112 @@ function get_orders_hpos($orderID = 32220)
         FROM `$table_order_item` as p
         LEFT OUTER JOIN `{$wpdb->prefix}postmeta` pm 
         ON (p.id=pm.post_id AND pm.meta_key = 'mahak_id') 
-        WHERE p.status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping')
+        WHERE p.status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping', 'wc-arrival-shipment')
         AND p.id >= %d
         AND (pm.meta_key IS NULL)
         ORDER BY p.id ASC", $orderID); // تغییر به مرتب‌سازی صعودی ID
+    $results = $wpdb->get_col($query);
+
+    return $results;
+}
+function get_left_behind_orders($max_id)
+{
+    global $wpdb;
+    
+    // اگر max_id معتبر نباشد، هیچ سفارش جا‌مانده‌ای وجود ندارد
+    if (empty($max_id) || $max_id <= 0) {
+        return array();
+    }
+    
+    $query = $wpdb->prepare("
+        SELECT posts.ID
+        FROM  `{$wpdb->posts}` AS posts 
+        JOIN (SELECT p.ID, p.post_title 
+              FROM `{$wpdb->posts}` as p 
+              LEFT OUTER JOIN `{$wpdb->prefix}postmeta` pm 
+              ON (p.ID=pm.post_id AND pm.meta_key = 'mahak_id') 
+              WHERE p.post_type = 'shop_order' 
+              AND (pm.meta_key IS NULL)) s2 
+        ON s2.ID = posts.ID
+        WHERE posts.post_type = 'shop_order' 
+        AND posts.post_status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping', 'wc-arrival-shipment')
+        AND posts.ID < %d
+        ORDER BY posts.ID ASC", $max_id);
+    $results = $wpdb->get_col($query);
+
+    return $results;
+}
+function get_left_behind_orders_hpos($max_id)
+{
+    global $wpdb;
+    
+    // اگر max_id معتبر نباشد، هیچ سفارش جا‌مانده‌ای وجود ندارد
+    if (empty($max_id) || $max_id <= 0) {
+        return array();
+    }
+    
+    $table_order_item = "{$wpdb->prefix}wc_orders";
+    $query = $wpdb->prepare("
+        SELECT p.id 
+        FROM `$table_order_item` as p
+        LEFT OUTER JOIN `{$wpdb->prefix}postmeta` pm 
+        ON (p.id=pm.post_id AND pm.meta_key = 'mahak_id') 
+        WHERE p.status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping', 'wc-arrival-shipment')
+        AND p.id < %d
+        AND (pm.meta_key IS NULL)
+        ORDER BY p.id ASC", $max_id);
+    $results = $wpdb->get_col($query);
+
+    return $results;
+}
+function get_left_behind_orders_from_limit($sync_limit, $max_id)
+{
+    global $wpdb;
+    
+    // اگر sync_limit یا max_id معتبر نباشند، هیچ سفارش جا‌مانده‌ای وجود ندارد
+    if (empty($sync_limit) || $sync_limit <= 0 || empty($max_id) || $max_id <= 0 || $sync_limit >= $max_id) {
+        return array();
+    }
+    
+    $query = $wpdb->prepare("
+        SELECT posts.ID
+        FROM  `{$wpdb->posts}` AS posts 
+        JOIN (SELECT p.ID, p.post_title 
+              FROM `{$wpdb->posts}` as p 
+              LEFT OUTER JOIN `{$wpdb->prefix}postmeta` pm 
+              ON (p.ID=pm.post_id AND pm.meta_key = 'mahak_id') 
+              WHERE p.post_type = 'shop_order' 
+              AND (pm.meta_key IS NULL)) s2 
+        ON s2.ID = posts.ID
+        WHERE posts.post_type = 'shop_order' 
+        AND posts.post_status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping', 'wc-arrival-shipment')
+        AND posts.ID >= %d
+        AND posts.ID < %d
+        ORDER BY posts.ID ASC", $sync_limit, $max_id);
+    $results = $wpdb->get_col($query);
+
+    return $results;
+}
+function get_left_behind_orders_from_limit_hpos($sync_limit, $max_id)
+{
+    global $wpdb;
+    
+    // اگر sync_limit یا max_id معتبر نباشند، هیچ سفارش جا‌مانده‌ای وجود ندارد
+    if (empty($sync_limit) || $sync_limit <= 0 || empty($max_id) || $max_id <= 0 || $sync_limit >= $max_id) {
+        return array();
+    }
+    
+    $table_order_item = "{$wpdb->prefix}wc_orders";
+    $query = $wpdb->prepare("
+        SELECT p.id 
+        FROM `$table_order_item` as p
+        LEFT OUTER JOIN `{$wpdb->prefix}postmeta` pm 
+        ON (p.id=pm.post_id AND pm.meta_key = 'mahak_id') 
+        WHERE p.status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping', 'wc-arrival-shipment')
+        AND p.id >= %d
+        AND p.id < %d
+        AND (pm.meta_key IS NULL)
+        ORDER BY p.id ASC", $sync_limit, $max_id);
     $results = $wpdb->get_col($query);
 
     return $results;
@@ -3038,7 +3658,7 @@ function get_orders($orderID = 32220)
               AND (pm.meta_key IS NULL)) s2 
         ON s2.ID = posts.ID
         WHERE posts.post_type = 'shop_order' 
-        AND posts.post_status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping')
+        AND posts.post_status IN ('wc-completed', 'wc-processing', 'wc-processing5', 'wc-pws-packaged', 'wc-pws-shipping', 'wc-arrival-shipment')
         {$where}
         ORDER BY posts.ID ASC", $orderID); // تغییر به مرتب‌سازی صعودی ID
     $results = $wpdb->get_col($query);

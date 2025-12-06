@@ -60,22 +60,80 @@ class BazaraApi
     }
     public function get_all_data($token = '', $input = array())
     {
+        // 1) دریافت توکن در صورت خالی بودن
         if (empty($token)) {
             $token_result = $this->login_token();
-            if (!$token_result['success'])
-                return array('success' => false, 'message' => $token_result['message']);
+            if (empty($token_result['success']) || !$token_result['success']) {
+                return array(
+                    'success' => false,
+                    'message' => $token_result['message'] ?? 'Token error'
+                );
+            }
             $token = $token_result['message'];
         }
-        $result = $this->http_post($this->getAll, $input, $token);
-        $result = json_decode($result, true);
-        if (!$result['Result']) {
-            Bz_Import_Export_For_Woo_Basic_Logwriter::write_log('خطا در دریافت اطللاعات ', 'Error ', json_encode($result));
-            return array('success' => false, 'message' => json_encode($result));
+    
+        // 2) درخواست از API
+        $response = $this->http_post($this->getAll, $input, $token);
+        $decoded  = json_decode($response, true);
+    
+        // 3) بررسی معتبر بودن JSON
+        if (!is_array($decoded)) {
+            Bz_Import_Export_For_Woo_Basic_Logwriter::write_log(
+                'پاسخ نامعتبر از API (JSON decode failed)',
+                'Error',
+                $response
+            );
+            return array(
+                'success' => false,
+                'message' => 'Invalid API response format'
+            );
         }
-
-
-        return array('success' => true, 'message' => $result['Data']['Objects']);
-    }
+    
+        // 4) وجود نداشتن کلید Result
+        if (!array_key_exists('Result', $decoded)) {
+            Bz_Import_Export_For_Woo_Basic_Logwriter::write_log(
+                'کلید Result در پاسخ API وجود ندارد',
+                'Error',
+                json_encode($decoded)
+            );
+            return array(
+                'success' => false,
+                'message' => 'Missing Result key in API response'
+            );
+        }
+    
+        // 5) اگر API خطا برگرداند
+        if (!$decoded['Result']) {
+            Bz_Import_Export_For_Woo_Basic_Logwriter::write_log(
+                'خطا در دریافت اطلاعات از API',
+                'Error',
+                json_encode($decoded)
+            );
+            return array(
+                'success' => false,
+                'message' => json_encode($decoded)
+            );
+        }
+    
+        // 6) بررسی وجود Data → Objects
+        if (!isset($decoded['Data']['Objects'])) {
+            Bz_Import_Export_For_Woo_Basic_Logwriter::write_log(
+                'Objects در پاسخ API یافت نشد',
+                'Error',
+                json_encode($decoded)
+            );
+            return array(
+                'success' => false,
+                'message' => 'Objects not found in API response'
+            );
+        }
+    
+        // 7) موفقیت کامل
+        return array(
+            'success' => true,
+            'message' => $decoded['Data']['Objects']
+        );
+    }    
     public function repair_entities($token = '', $url = '', $input = array())
     {
         if (empty($token)) {
@@ -1269,7 +1327,10 @@ class BazaraApi
                         $ProductID = get_product_id($productAsset['ProductDetailId']);
                         update_schedule_sync($ProductID, 'stockSync', 0);
                         update_schedule_sync($productAsset['ProductDetailId'], 'isSync', 0, 'bazara_product_details', 'ProductDetailId');
-
+                        
+                        if (class_exists("sell_simple_with_date_variants")){
+                            update_schedule_sync($ProductID,'detailSync',0);
+                        }
                         // }
                     }
                 }
@@ -2306,7 +2367,13 @@ private function get_all_roles() {
     public function register_users($token, $personGroup, $user)
     {
         $datas = array();
-        $user = $user[0];
+        // Normalize $user: accept WP_User or array with first element
+        if (is_array($user)) {
+            $user = reset($user);
+        }
+        if (empty($user) || !is_object($user) || empty($user->ID)) {
+            return false;
+        }
         $last_name = get_user_meta($user->ID, 'last_name', true);
         $first_name = get_user_meta($user->ID, 'first_name', true);
         if (empty($last_name) && empty($first_name)) return false;
@@ -2387,6 +2454,17 @@ private function get_all_roles() {
         $Order_Max_ID = (int) $options['order_id_greater_than'];
         $max_id = (!empty($Order_Max_ID) ? $Order_Max_ID : null);
 
+        // تنظیم لیمیت ثابت برای سفارش‌های جا‌مانده (یکبار تنظیم می‌شود و دیگر تغییر نمی‌کند)
+        $left_behind_sync_limit = isset($options['left_behind_sync_limit']) ? (int) $options['left_behind_sync_limit'] : null;
+        if ($left_behind_sync_limit === null && $max_id > 0) {
+            // اولین بار: لیمیت را از max_id فعلی تنظیم می‌کنیم
+            $left_behind_sync_limit = $max_id;
+            $options['left_behind_sync_limit'] = $left_behind_sync_limit;
+            update_option('bazara_visitor_settings', $options);
+            $this->visitor_settings = $options;
+        }
+
+        // دریافت سفارش‌های جدید (ID >= max_id)
         if (!$hpos_enable) {
             $orders = get_orders($max_id);
             if (count($orders) == 0) {
@@ -2399,12 +2477,33 @@ private function get_all_roles() {
             }
         }
 
+        // دریافت سفارش‌های جا‌مانده (ID >= left_behind_sync_limit و ID < max_id که هنوز سینک نشده‌اند)
+        $left_behind_orders = array();
+        if ($left_behind_sync_limit !== null && $left_behind_sync_limit > 0 && $max_id > 0) {
+            if (!$hpos_enable) {
+                $left_behind_orders = get_left_behind_orders_from_limit($left_behind_sync_limit, $max_id);
+                if (count($left_behind_orders) == 0) {
+                    $left_behind_orders = get_left_behind_orders_from_limit_hpos($left_behind_sync_limit, $max_id);
+                }
+            } else {
+                $left_behind_orders = get_left_behind_orders_from_limit_hpos($left_behind_sync_limit, $max_id);
+                if (count($left_behind_orders) == 0) {
+                    $left_behind_orders = get_left_behind_orders_from_limit($left_behind_sync_limit, $max_id);
+                }
+            }
+        }
+
+        // ترکیب تمام سفارش‌ها (ابتدا جا‌مانده‌ها، سپس جدیدها)
+        $all_orders = array_merge($left_behind_orders, $orders);
+
         $message = "";
         $success = 0;
         $errors = 0;
         $error_message = '';
+        $left_behind_success = 0;
+        $left_behind_errors = 0;
 
-        if (!empty($orders)) {
+        if (!empty($all_orders)) {
             if (empty($token)) {
                 $token_result = $this->login_token();
                 if (!$token_result['success']) {
@@ -2415,22 +2514,48 @@ private function get_all_roles() {
 
             $this->visitor_settings = get_option('bazara_visitor_settings', []);
 
-            for ($i = 0; $i < count($orders); $i++) {
-                $order_id = $orders[$i];
-                $result = $this->bazara_save_order($order_id, $token);
+            // سینک سفارش‌های جا‌مانده
+            if (!empty($left_behind_orders)) {
+                for ($i = 0; $i < count($left_behind_orders); $i++) {
+                    $order_id = $left_behind_orders[$i];
+                    $result = $this->bazara_save_order($order_id, $token);
 
-                if ($result['success']) {
-                    $success++;
-                    // آپدیت order_id_greater_than به سفارش سینک‌شده
-                    $this->visitor_settings['order_id_greater_than'] = (int) $order_id;
-                    update_option('bazara_visitor_settings', $this->visitor_settings);
-                } else {
-                    $errors++;
-                    $error_message .= '[شناسه سفارش:' . $order_id . '] ' . $result['message'] . '<br/>';
+                    if ($result['success']) {
+                        $left_behind_success++;
+                        $success++;
+                        // برای سفارش‌های جا‌مانده، max_id را آپدیت نمی‌کنیم
+                    } else {
+                        $left_behind_errors++;
+                        $errors++;
+                        $error_message .= '[شناسه سفارش جا‌مانده:' . $order_id . '] ' . $result['message'] . '<br/>';
+                    }
+                }
+            }
+
+            // سینک سفارش‌های جدید
+            if (!empty($orders)) {
+                for ($i = 0; $i < count($orders); $i++) {
+                    $order_id = $orders[$i];
+                    $result = $this->bazara_save_order($order_id, $token);
+
+                    if ($result['success']) {
+                        $success++;
+                        // آپدیت order_id_greater_than به سفارش سینک‌شده
+                        $this->visitor_settings['order_id_greater_than'] = (int) $order_id;
+                        update_option('bazara_visitor_settings', $this->visitor_settings);
+                    } else {
+                        $errors++;
+                        $error_message .= '[شناسه سفارش:' . $order_id . '] ' . $result['message'] . '<br/>';
+                    }
                 }
             }
 
             $message = '<div style="color:blue;">همگام‌سازی سفارش‌ها شروع شد</div><br/>';
+            
+            if ($left_behind_success > 0) {
+                $message .= '<div style="color:green;">تعداد ' . $left_behind_success . ' سفارش جا‌مانده با موفقیت سینک شد.</div><br/>';
+            }
+            
             if ($success == 0) {
                 $message .= 'هیچ سفارش جدیدی جهت ارسال یافت نشد.' . '<br/>';
             } else {
@@ -2517,6 +2642,21 @@ private function get_all_roles() {
 
 
         $order = wc_get_order($order_id);
+
+        if ( $order instanceof WC_Order_Refund ) {
+            return [
+                'success' => true,
+                'message' => 'عدم پردازش ریفاند'
+            ];
+        }
+
+        if ($order->has_status('pending')) {
+            return [
+                'success' => true,
+                'message' => 'عدم ارسال سفارش در انتظار پرداخت'
+            ];
+        }
+
         $ShippingMethod = get_order_item_meta_shipping($order_id);
 
 
@@ -2534,13 +2674,20 @@ private function get_all_roles() {
 
 
         $order_customer = get_userdata($order_customer_id);
-        $user_person = $this->convert_user_to_people($order_customer, get_user_meta($order_customer->ID, 'mahak_id', true))['people'];
-        $mahakID = get_user_meta($order_customer->ID, 'mahak_id', true);
+        // Initialize with safe defaults
+        $user_person = array('mobile' => '', 'personId' => 0);
+        $mahakID = 0;
+        if (!empty($order_customer) && is_object($order_customer) && !empty($order_customer->ID)) {
+            $user_person = $this->convert_user_to_people($order_customer, get_user_meta($order_customer->ID, 'mahak_id', true))['people'];
+            $mahakID = get_user_meta($order_customer->ID, 'mahak_id', true);
+        }
         if ($customerType == BAZARA_PERSON_REGISTER) {
-            if (empty($mahakID)) {
+            if (empty($mahakID) && !empty($order_customer) && is_object($order_customer) && !empty($order_customer->ID)) {
                 $user = get_user_by('id', $order_customer->ID);
-                $this->register_user_in_order($token, array($user));
-                $mahakID = get_user_meta($order_customer->ID, 'mahak_id', true);
+                if (!empty($user) && is_object($user) && !empty($user->ID)) {
+                    $this->register_user_in_order($token, array($user));
+                    $mahakID = get_user_meta($order_customer->ID, 'mahak_id', true);
+                }
             }
         } else if ($customerType == BAZARA_PERSON_GENERAL) {
             $mahakID = $generalPerson;
@@ -2604,8 +2751,11 @@ private function get_all_roles() {
         if (empty($total_amount) || $total_amount == 0)
             $total_amount = get_order_item_meta_payment_hpos($order_id)->total_amount;
 
-        $wallet = get_order_item_meta_payment_hpos($order_id)->payment_method == 'wallet';
-        $order_shipping_cost = get_order_item_shipping_amount_hpos($order_id)->cost;
+        $payment_meta = get_order_item_meta_payment_hpos($order_id);
+        $wallet = (!empty($payment_meta) && !empty($payment_meta->payment_method) && $payment_meta->payment_method === 'wallet');
+            
+        $shipping_meta = get_order_item_shipping_amount_hpos($order_id);
+        $order_shipping_cost = (!empty($shipping_meta) && !empty($shipping_meta->cost)) ? $shipping_meta->cost : 0;            
         if (!$hpos_enable)
             $order_number = get_post_meta($order_id, '_order_number', true);
         else {
@@ -3067,6 +3217,132 @@ private function get_all_roles() {
                     }
                 }
             }
+
+            // منطق جدید مجزا برای شرایط خاص: هر دو کلاس موجود + اولویت انبار فعال
+            if (
+                class_exists("sell_simple_with_date_variants") &&
+                class_exists("sell_simple_with_date_variants_without_date") &&
+                $store_priority_toggle &&
+                is_array($store_priority_value)
+            ) {
+                // پاک کردن orderDetails قبلی برای شروع مجدد
+                $product_orders['orderDetails'] = array();
+
+                // متغیرهای کنترل
+                $remaining_quantity = $quantity;
+                $processed_quantity = 0;
+                $order_detail_counter = 0;
+
+                // پردازش بر اساس اولویت انبار و سریال‌های محصول
+                foreach ($store_priority_value as $store) {
+                    if ($processed_quantity >= $quantity) break;
+
+                    // اگر سریال‌های محصول موجود هستند
+                    if (is_array($getProductSerials) && !empty($getProductSerials)) {
+                        foreach ($getProductSerials as $pdt) {
+                            if ($processed_quantity >= $quantity) break;
+
+                            $storeAsset = get_product_assets($pdt['detail_id'], $store)[0];
+
+                            if (!empty($storeAsset) && $storeAsset->Count1 > 0) {
+                                $needed_quantity = min($remaining_quantity, $storeAsset->Count1);
+
+                                // تولید orderDetailClientId جدید
+                                if ($order_detail_counter > 0) {
+                                    bazara_update_client_id('order_detail', $orderDetailClientID);
+                                    $orderDetailClientID = bazara_get_last_client_id('order_detail') + 1;
+                                }
+
+                                $product_orders['orderDetails'][] = array(
+                                    'orderClientId'       => $orderClientID,
+                                    'orderDetailClientId' => (int)$orderDetailClientID,
+                                    'itemType'            => 1,
+                                    'productDetailId'     => (int)$pdt['detail_id'],
+                                    'price'               => $unit_price,
+                                    'count1'              => $needed_quantity,
+                                    'count2'              => $count2,
+                                    'storeId'             => (int)$store,
+                                    'discount'            => $total_row_discount,
+                                    'discountType'        => 0,
+                                    'taxPercent'          => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                                    'chargePercent'       => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                                    'promotionCode'       => 0,
+                                    'description'         => '',
+                                    'orderCode'           => 0,
+                                    'deleted'             => false,
+                                    'gift'                => 0
+                                );
+
+                                $remaining_quantity -= $needed_quantity;
+                                $processed_quantity += $needed_quantity;
+                                $order_detail_counter++;
+
+                                // اگر مقدار مورد نیاز تأمین شد، از حلقه خارج شو
+                                if ($remaining_quantity <= 0) break 2;
+                            }
+                        }
+                    } else {
+                        // اگر سریال محصول موجود نیست، از انبار اصلی استفاده کن
+                        $storeAsset = get_product_assets($p_detail_id, $store)[0];
+
+                        if (!empty($storeAsset) && $storeAsset->Count1 > 0) {
+                            $needed_quantity = min($remaining_quantity, $storeAsset->Count1);
+
+                            // تولید orderDetailClientId جدید
+                            if ($order_detail_counter > 0) {
+                                bazara_update_client_id('order_detail', $orderDetailClientID);
+                                $orderDetailClientID = bazara_get_last_client_id('order_detail') + 1;
+                            }
+
+                            $product_orders['orderDetails'][] = array(
+                                'orderClientId'       => $orderClientID,
+                                'orderDetailClientId' => (int)$orderDetailClientID,
+                                'itemType'            => 1,
+                                'productDetailId'     => (int)$p_detail_id,
+                                'price'               => $unit_price,
+                                'count1'              => ($serialUsed ? 1 : $needed_quantity),
+                                'count2'              => $count2,
+                                'storeId'             => (int)$store,
+                                'discount'            => $total_row_discount,
+                                'discountType'        => 0,
+                                'taxPercent'          => ($p_tax == '-1' ? 0 : (!empty($p_tax) ? $p_tax : 0)),
+                                'chargePercent'       => ($p_charge == '-1' ? 0 : (!empty($p_charge) ? $p_charge : 0)),
+                                'promotionCode'       => 0,
+                                'description'         => '',
+                                'orderCode'           => 0,
+                                'deleted'             => false,
+                                'gift'                => 0
+                            );
+
+                            $remaining_quantity -= $needed_quantity;
+                            $processed_quantity += $needed_quantity;
+                            $order_detail_counter++;
+
+                            // اگر مقدار مورد نیاز تأمین شد، از حلقه خارج شو
+                            if ($remaining_quantity <= 0) break;
+                        }
+                    }
+                }
+
+                // بررسی اینکه آیا تمام مقدار مورد نیاز تأمین شده است
+                if ($remaining_quantity > 0) {
+                    // لاگ کردن مشکل کمبود موجودی
+                    error_log("Bazara Order Processing: Insufficient stock. Required: {$quantity}, Processed: {$processed_quantity}, Remaining: {$remaining_quantity}");
+
+                    // می‌توانید تصمیم بگیرید که آیا سفارش را رد کنید یا با موجودی موجود ادامه دهید
+                    echo 'موجودی کافی برای تأمین سفارش موجود نیست';
+                    return array('success' => false, 'message' => 'موجودی کافی برای تأمین سفارش موجود نیست');
+                }
+
+                // به‌روزرسانی orderDetailClientID برای استفاده در بخش‌های بعدی
+                if ($order_detail_counter > 0) {
+                    bazara_update_client_id('order_detail', $orderDetailClientID);
+                }
+
+                // علامت‌گذاری که این منطق جدید اجرا شده است
+                $product_orders['processed_with_new_logic'] = true;
+            }
+
         }
 
         // echo "<pre>";
@@ -3303,61 +3579,58 @@ private function get_all_roles() {
     }
     private function handle_order_errors($error, $oid = '')
     {
-
         $checkError = true;
         $orderDetailError = $orderError = true;
         $hpos_enable = false;
-
+    
         if (isset($error['message'])) {
             $error = $error['message'];
             $error = json_decode($error, true);
         }
-
-
+    
+        // Check cheque result
         if (
-            isset($error['Data']['Objects'])
-            &&  isset($error['Data']['Objects']['Cheques'])
-            &&  isset($error['Data']['Objects']['Cheques']['Results'])
-            &&  isset($error['Data']['Objects']['Cheques']['Results'][0])
-        )
+            isset($error['Data']['Objects']['Cheques']['Results'][0])
+        ) {
             $checkError = $error['Data']['Objects']['Cheques']['Results'][0]['Result'];
-
+        }
+    
         if (!$checkError) {
             $cheqid = bazara_get_last_client_id('cheque') + 500;
             bazara_update_client_id('cheque', $cheqid);
         }
-
+    
+        // Check order detail result
         if (
-            isset($error['Data']['Objects'])
-            &&  isset($error['Data']['Objects']['OrderDetails'])
-            &&  isset($error['Data']['Objects']['OrderDetails']['Results'])
-            &&  isset($error['Data']['Objects']['OrderDetails']['Results'][0])
-        )
+            isset($error['Data']['Objects']['OrderDetails']['Results'][0])
+        ) {
             $orderDetailError = $error['Data']['Objects']['OrderDetails']['Results'][0]['Result'];
-
+        }
+    
         if (!$orderDetailError) {
             $orderDetailID = bazara_get_last_client_id('order_detail') + 500;
             bazara_update_client_id('order_detail', $orderDetailID);
         }
+    
+        // Check order result
         if (
-            isset($error['Data']['Objects'])
-            &&  isset($error['Data']['Objects']['Orders'])
-            &&  isset($error['Data']['Objects']['Orders']['Results'])
-            &&  isset($error['Data']['Objects']['Orders']['Results'][0])
-        )
+            isset($error['Data']['Objects']['Orders']['Results'][0])
+        ) {
             $orderError = $error['Data']['Objects']['Orders']['Results'][0]['Result'];
-
+        }
+    
         if (!$orderError) {
-            if (!$hpos_enable)
+            if (!$hpos_enable) {
                 update_post_meta($oid, 'mahak_id', '54323444');
-            else {
-                //HPOS
+            } else {
+                // HPOS
                 $order_hpos = wc_get_order($oid);
                 $order_hpos->update_meta_data('mahak_id', '54323444');
                 $order_hpos->save();
             }
         }
     }
+    
     private function get_selected_shipping_person_id($shipping_method)
     {
         $options = $this->visitor_settings;
@@ -3411,12 +3684,14 @@ private function get_all_roles() {
         $ChargePercent = 0;
         $TaxPercent = 0;
         $visitorSettings = get_option('bazara_visitor_soft_settings', true);
-        if (!empty($visitorSettings) && is_array($visitorSettings)) {
-            foreach ($visitorSettings as $setting) {
-                if (intval($setting['SettingCode']) === 14000)
-                    $ChargePercent = intval($setting['Value']);
-                if (intval($setting['SettingCode']) === 14001)
-                    $TaxPercent = intval($setting['Value']);
+        if($this->visitor_settings['chkPrice']) {
+            if (!empty($visitorSettings) && is_array($visitorSettings)) {
+                foreach ($visitorSettings as $setting) {
+                    if (intval($setting['SettingCode']) === 14000)
+                        $ChargePercent = intval($setting['Value']);
+                    if (intval($setting['SettingCode']) === 14001)
+                        $TaxPercent = intval($setting['Value']);
+                }
             }
         }
 
